@@ -1,12 +1,12 @@
 <?php
 
-namespace VendorName\Skeleton\Commands;
+namespace VitisStudio\LaravelCloudDbDumper\Commands;
 
 use Illuminate\Console\Command;
 
-class SkeletonCommand extends Command
+class LaravelCloudDbDumperCommand extends Command
 {
-    public $signature = 'skeleton';
+    public $signature = 'laravel-cloud-db-dumper';
 
     public $description = 'My command';
 

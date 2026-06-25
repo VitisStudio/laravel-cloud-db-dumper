@@ -1,12 +1,12 @@
 <?php
 
-namespace VendorName\Skeleton;
+namespace VitisStudio\LaravelCloudDbDumper;
 
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
-use VendorName\Skeleton\Commands\SkeletonCommand;
+use VitisStudio\LaravelCloudDbDumper\Commands\LaravelCloudDbDumperCommand;
 
-class SkeletonServiceProvider extends PackageServiceProvider
+class LaravelCloudDbDumperServiceProvider extends PackageServiceProvider
 {
     public function configurePackage(Package $package): void
     {
@@ -16,10 +16,10 @@ class SkeletonServiceProvider extends PackageServiceProvider
          * More info: https://github.com/spatie/laravel-package-tools
          */
         $package
-            ->name('skeleton')
+            ->name('laravel-cloud-db-dumper')
             ->hasConfigFile()
             ->hasViews()
-            ->hasMigration('create_migration_table_name_table')
-            ->hasCommand(SkeletonCommand::class);
+            ->hasMigration('create_laravel_cloud_db_dumper_table')
+            ->hasCommand(LaravelCloudDbDumperCommand::class);
     }
 }
