@@ -18,8 +18,6 @@ class LaravelCloudDbDumperServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-cloud-db-dumper')
             ->hasConfigFile()
-            ->hasViews()
-            ->hasMigration('create_laravel_cloud_db_dumper_table')
             ->hasCommand(LaravelCloudDbDumperCommand::class);
     }
 }
