@@ -22,9 +22,11 @@ it('builds a postgres restore command with PGPASSWORD and binary path', function
 
     [$command, $env] = $manager->postgresRestoreCommand('/dumps/forge.sql');
 
+    // escapeshellarg() quotes with ' on POSIX and " on Windows, so build the
+    // expectation the same way rather than hardcoding one platform's quoting.
     expect($command)->toContain('/opt/pg/bin/psql')
-        ->and($command)->toContain("--dbname='local_app'")
-        ->and($command)->toContain("--file='/dumps/forge.sql'")
+        ->and($command)->toContain('--dbname='.escapeshellarg('local_app'))
+        ->and($command)->toContain('--file='.escapeshellarg('/dumps/forge.sql'))
         ->and($env)->toBe(['PGPASSWORD' => 'password']);
 });
 
@@ -45,8 +47,8 @@ it('builds a mysql restore command with MYSQL_PWD and stdin redirect', function 
     [$command, $env] = $manager->mySqlRestoreCommand('/dumps/app.sql');
 
     expect($command)->toContain('/usr/local/bin/mysql')
-        ->and($command)->toContain("--user='sail'")
-        ->and($command)->toContain("< '/dumps/app.sql'")
+        ->and($command)->toContain('--user='.escapeshellarg('sail'))
+        ->and($command)->toContain('< '.escapeshellarg('/dumps/app.sql'))
         ->and($env)->toBe(['MYSQL_PWD' => 'password']);
 });
 
