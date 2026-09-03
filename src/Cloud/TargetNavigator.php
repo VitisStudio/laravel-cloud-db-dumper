@@ -7,17 +7,43 @@ use RuntimeException;
 use function Laravel\Prompts\select;
 
 /**
- * Walks the Laravel Cloud hierarchy interactively (application → environment →
- * schema) and resolves the owning cluster, returning a fully-built
+ * Walks the Laravel Cloud hierarchy interactively (organization → application →
+ * environment → schema) and resolves the owning cluster, returning a fully-built
  * DatabaseTarget. The cluster-resolution logic is separated from the prompts so
  * it can be unit tested against canned CLI output.
  */
 class TargetNavigator
 {
+    protected CloudCli $cloud;
+
+    protected OrganizationResolver $organizations;
+
+    protected ?string $organization = null;
+
+    protected bool $organizationResolved = false;
+
     public function __construct(
-        protected readonly CloudCli $cloud,
+        CloudCli $cloud,
+        ?OrganizationResolver $organizations = null,
     ) {
-        //
+        $this->cloud = $cloud;
+        $this->organizations = $organizations ?? new OrganizationResolver($cloud);
+    }
+
+    /**
+     * Preselect the organization, so a saved target does not re-prompt.
+     */
+    public function useOrganization(?string $organization): void
+    {
+        $this->organization = $organization !== '' ? $organization : null;
+    }
+
+    /**
+     * The organization the last CLI call ran as, once one has been resolved.
+     */
+    public function organization(): ?string
+    {
+        return $this->organization;
     }
 
     /**
@@ -26,7 +52,7 @@ class TargetNavigator
      */
     public function navigate(): DatabaseTarget
     {
-        $applications = $this->cloud->applications();
+        $applications = $this->call(fn (CloudCli $cloud) => $cloud->applications());
 
         if ($applications === []) {
             throw new RuntimeException('No Laravel Cloud applications found for this organization.');
@@ -34,7 +60,7 @@ class TargetNavigator
 
         $application = $this->choose('Select an application', $applications);
 
-        $environments = $this->cloud->environments((string) $application['id']);
+        $environments = $this->call(fn (CloudCli $cloud) => $cloud->environments((string) $application['id']));
 
         if ($environments === []) {
             throw new RuntimeException("No environments found for application \"{$application['name']}\".");
@@ -42,7 +68,7 @@ class TargetNavigator
 
         $environment = $this->choose('Select an environment', $environments);
 
-        $clusters = $this->cloud->clusters();
+        $clusters = $this->call(fn (CloudCli $cloud) => $cloud->clusters());
         $cluster = $this->resolveCluster($clusters, (string) ($environment['databaseSchemaId'] ?? ''));
 
         $schema = $this->chooseSchema($cluster, (string) ($environment['databaseSchemaId'] ?? ''));
@@ -56,6 +82,7 @@ class TargetNavigator
             clusterName: (string) $cluster['name'],
             clusterType: (string) $cluster['type'],
             schemaName: (string) $schema['name'],
+            organizationName: $this->organization,
         );
     }
 
@@ -64,7 +91,9 @@ class TargetNavigator
      */
     public function attachCredentials(DatabaseTarget $target): DatabaseTarget
     {
-        $cluster = $this->cloud->clusterWithCredentials($target->clusterId);
+        $this->useOrganization($this->organization ?? $target->organizationName);
+
+        $cluster = $this->call(fn (CloudCli $cloud) => $cloud->clusterWithCredentials($target->clusterId));
 
         $connection = $cluster['connection'] ?? null;
 
@@ -73,7 +102,9 @@ class TargetNavigator
         }
 
         /** @var array{protocol: string, hostname: string, port: int|string, username: string, password: string} $connection */
-        return $target->withConnection($connection);
+        return $target
+            ->withOrganization($this->organization ?? $target->organizationName)
+            ->withConnection($connection);
     }
 
     /**
@@ -93,6 +124,34 @@ class TargetNavigator
         }
 
         throw new RuntimeException('Could not find a database cluster for the selected environment.');
+    }
+
+    /**
+     * Run a CLI call, resolving the organization once if the CLI reports that
+     * it cannot pick between several saved API tokens.
+     *
+     * @template TReturn
+     *
+     * @param  callable(CloudCli): TReturn  $call
+     * @return TReturn
+     */
+    protected function call(callable $call): mixed
+    {
+        try {
+            return $call($this->cloud);
+        } catch (CloudCliException $e) {
+            if ($this->organizationResolved || ! $e->requiresOrganization()) {
+                throw $e;
+            }
+
+            ['organization' => $organization, 'token' => $token] = $this->organizations->resolve($this->organization);
+
+            $this->cloud = $this->cloud->withApiToken($token);
+            $this->organization = $organization;
+            $this->organizationResolved = true;
+
+            return $call($this->cloud);
+        }
     }
 
     /**

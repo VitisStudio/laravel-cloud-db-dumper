@@ -24,6 +24,7 @@ class DatabaseTarget
         public readonly string $clusterName,
         public readonly string $clusterType,
         public readonly string $schemaName,
+        public readonly ?string $organizationName = null,
         public readonly ?string $defaultSeeder = null,
         public readonly ?array $connection = null,
     ) {
@@ -46,16 +47,37 @@ class DatabaseTarget
     public function withConnection(array $connection): self
     {
         return new self(
-            $this->applicationId,
-            $this->applicationName,
-            $this->environmentId,
-            $this->environmentName,
-            $this->clusterId,
-            $this->clusterName,
-            $this->clusterType,
-            $this->schemaName,
-            $this->defaultSeeder,
-            $connection,
+            applicationId: $this->applicationId,
+            applicationName: $this->applicationName,
+            environmentId: $this->environmentId,
+            environmentName: $this->environmentName,
+            clusterId: $this->clusterId,
+            clusterName: $this->clusterName,
+            clusterType: $this->clusterType,
+            schemaName: $this->schemaName,
+            organizationName: $this->organizationName,
+            defaultSeeder: $this->defaultSeeder,
+            connection: $connection,
+        );
+    }
+
+    /**
+     * Return a copy of this target bound to a Laravel Cloud organization.
+     */
+    public function withOrganization(?string $organizationName): self
+    {
+        return new self(
+            applicationId: $this->applicationId,
+            applicationName: $this->applicationName,
+            environmentId: $this->environmentId,
+            environmentName: $this->environmentName,
+            clusterId: $this->clusterId,
+            clusterName: $this->clusterName,
+            clusterType: $this->clusterType,
+            schemaName: $this->schemaName,
+            organizationName: $organizationName,
+            defaultSeeder: $this->defaultSeeder,
+            connection: $this->connection,
         );
     }
 
@@ -65,23 +87,24 @@ class DatabaseTarget
     public function withDefaultSeeder(?string $seeder): self
     {
         return new self(
-            $this->applicationId,
-            $this->applicationName,
-            $this->environmentId,
-            $this->environmentName,
-            $this->clusterId,
-            $this->clusterName,
-            $this->clusterType,
-            $this->schemaName,
-            $seeder,
-            $this->connection,
+            applicationId: $this->applicationId,
+            applicationName: $this->applicationName,
+            environmentId: $this->environmentId,
+            environmentName: $this->environmentName,
+            clusterId: $this->clusterId,
+            clusterName: $this->clusterName,
+            clusterType: $this->clusterType,
+            schemaName: $this->schemaName,
+            organizationName: $this->organizationName,
+            defaultSeeder: $seeder,
+            connection: $this->connection,
         );
     }
 
     /**
      * Identifying fields only — safe to persist (no credentials).
      *
-     * @return array{applicationId: string, applicationName: string, environmentId: string, environmentName: string, clusterId: string, clusterName: string, clusterType: string, schemaName: string, defaultSeeder: string|null}
+     * @return array{applicationId: string, applicationName: string, environmentId: string, environmentName: string, clusterId: string, clusterName: string, clusterType: string, schemaName: string, organizationName: string|null, defaultSeeder: string|null}
      */
     public function toArray(): array
     {
@@ -94,6 +117,7 @@ class DatabaseTarget
             'clusterName' => $this->clusterName,
             'clusterType' => $this->clusterType,
             'schemaName' => $this->schemaName,
+            'organizationName' => $this->organizationName,
             'defaultSeeder' => $this->defaultSeeder,
         ];
     }
@@ -104,15 +128,16 @@ class DatabaseTarget
     public static function fromArray(array $data): self
     {
         return new self(
-            (string) $data['applicationId'],
-            (string) $data['applicationName'],
-            (string) $data['environmentId'],
-            (string) $data['environmentName'],
-            (string) $data['clusterId'],
-            (string) $data['clusterName'],
-            (string) $data['clusterType'],
-            (string) $data['schemaName'],
-            isset($data['defaultSeeder']) ? (string) $data['defaultSeeder'] : null,
+            applicationId: (string) $data['applicationId'],
+            applicationName: (string) $data['applicationName'],
+            environmentId: (string) $data['environmentId'],
+            environmentName: (string) $data['environmentName'],
+            clusterId: (string) $data['clusterId'],
+            clusterName: (string) $data['clusterName'],
+            clusterType: (string) $data['clusterType'],
+            schemaName: (string) $data['schemaName'],
+            organizationName: isset($data['organizationName']) ? (string) $data['organizationName'] : null,
+            defaultSeeder: isset($data['defaultSeeder']) ? (string) $data['defaultSeeder'] : null,
         );
     }
 }

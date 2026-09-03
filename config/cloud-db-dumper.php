@@ -16,6 +16,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cloud organization
+    |--------------------------------------------------------------------------
+    |
+    | Since Cloud CLI 0.5 one machine can hold an API token per organization,
+    | and the CLI refuses to guess when it is not attached to a terminal. Name
+    | the organization here to pin it; leave null to be prompted once and have
+    | the choice remembered in the preferences file.
+    |
+    */
+    'organization' => env('CLOUD_ORGANIZATION'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Backup storage
     |--------------------------------------------------------------------------
     |

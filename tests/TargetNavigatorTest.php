@@ -1,6 +1,8 @@
 <?php
 
+use Illuminate\Support\Facades\Process;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
+use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
 
 function clustersFixture(): array
@@ -45,3 +47,54 @@ it('throws when the schema id is empty', function () {
 
     $navigator->resolveCluster(clustersFixture(), '');
 })->throws(RuntimeException::class);
+
+it('retries with the saved organization token when the cli cannot choose one', function () {
+    $cluster = [
+        'id' => 'cluster-b',
+        'name' => 'cluster-b',
+        'type' => 'postgres',
+        'connection' => [
+            'protocol' => 'postgresql',
+            'hostname' => 'db.example.com',
+            'port' => 5432,
+            'username' => 'admin',
+            'password' => 'secret',
+        ],
+    ];
+
+    Process::fake([
+        '*auth:token*' => Process::result(json_encode([
+            ['token' => '1|aaa', 'source' => 'config.json', 'organization' => 'Vitis Studio'],
+            ['token' => '2|bbb', 'source' => 'config.json', 'organization' => 'Sidecar'],
+        ])),
+        '*database-cluster:get*' => Process::sequence()
+            ->push(Process::result(
+                output: '',
+                errorOutput: json_encode(['error' => true, 'message' => 'Multiple API tokens found.']),
+                exitCode: 1,
+            ))
+            ->push(Process::result(json_encode($cluster))),
+    ]);
+
+    $navigator = new TargetNavigator(new CloudCli);
+
+    $target = new DatabaseTarget(
+        applicationId: 'app-1',
+        applicationName: 'My App',
+        environmentId: 'env-1',
+        environmentName: 'production',
+        clusterId: 'cluster-b',
+        clusterName: 'cluster-b',
+        clusterType: 'postgres',
+        schemaName: 'forge',
+        organizationName: 'Sidecar',
+    );
+
+    $resolved = $navigator->attachCredentials($target);
+
+    expect($resolved->connection['hostname'])->toBe('db.example.com')
+        ->and($resolved->organizationName)->toBe('Sidecar')
+        ->and($navigator->organization())->toBe('Sidecar');
+
+    Process::assertRan(fn ($process) => ($process->environment['LARAVEL_CLOUD_TOKEN'] ?? null) === '2|bbb');
+});

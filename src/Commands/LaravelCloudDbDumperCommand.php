@@ -23,6 +23,7 @@ use function Laravel\Prompts\warning;
 class LaravelCloudDbDumperCommand extends Command
 {
     public $signature = 'db:pull
+        {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
         {--no-restore : Dump only; do not restore into the local database}
         {--no-seed : Skip the post-restore seeder step}';
@@ -63,6 +64,8 @@ class LaravelCloudDbDumperCommand extends Command
             }
         }
 
+        $target = $target->withOrganization($navigator->organization() ?? $target->organizationName);
+
         $preferences->save($target);
         info('Saved preferences to '.config('cloud-db-dumper.prefs_file'));
 
@@ -72,6 +75,10 @@ class LaravelCloudDbDumperCommand extends Command
     protected function resolveTarget(TargetNavigator $navigator, Preferences $preferences): DatabaseTarget
     {
         $saved = $this->option('fresh') ? null : $preferences->load();
+
+        $navigator->useOrganization(
+            $this->organization() ?? $saved?->organizationName,
+        );
 
         if ($saved !== null) {
             $useSaved = confirm(
@@ -185,6 +192,17 @@ class LaravelCloudDbDumperCommand extends Command
         info("Ran seeder: {$chosen}");
 
         return $target->withDefaultSeeder((string) $chosen);
+    }
+
+    /**
+     * Organization to run the Cloud CLI as, from the flag or config. Null lets
+     * the CLI resolve it, and the navigator prompts if it cannot.
+     */
+    protected function organization(): ?string
+    {
+        $organization = (string) ($this->option('organization') ?? config('cloud-db-dumper.organization') ?? '');
+
+        return $organization !== '' ? $organization : null;
     }
 
     protected function backupPath(): string
