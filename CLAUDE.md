@@ -11,7 +11,7 @@ placeholder — the intended feature (dumping a database on Laravel Cloud) is no
 yet implemented.
 
 - Namespace: `VitisStudio\LaravelCloudDbDumper\` → `src/`
-- PHP `^8.4`, Laravel `^11 || ^12 || ^13` (via `illuminate/contracts`)
+- PHP `^8.3`, Laravel `^11 || ^12 || ^13` (via `illuminate/contracts`)
 - Built on `spatie/laravel-package-tools` (`PackageServiceProvider`)
 
 ## Layout
