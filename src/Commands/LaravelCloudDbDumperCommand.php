@@ -6,10 +6,12 @@ use Illuminate\Console\Command;
 use Throwable;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
 use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
+use VitisStudio\LaravelCloudDbDumper\Cloud\LocalConfig;
 use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
 use VitisStudio\LaravelCloudDbDumper\Dumpers\DumpManager;
 use VitisStudio\LaravelCloudDbDumper\Restorers\RestoreManager;
 use VitisStudio\LaravelCloudDbDumper\Seeders\SeederDiscovery;
+use VitisStudio\LaravelCloudDbDumper\Support\GitRepository;
 use VitisStudio\LaravelCloudDbDumper\Support\Preferences;
 
 use function Laravel\Prompts\confirm;
@@ -23,6 +25,8 @@ use function Laravel\Prompts\warning;
 class LaravelCloudDbDumperCommand extends Command
 {
     public $signature = 'db:pull
+        {application? : The application ID or name}
+        {environment? : The environment ID or name}
         {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
         {--no-restore : Dump only; do not restore into the local database}
@@ -44,7 +48,11 @@ class LaravelCloudDbDumperCommand extends Command
     protected function backup(): int
     {
         $cloud = new CloudCli((string) config('cloud-db-dumper.cloud_binary', 'cloud'));
-        $navigator = new TargetNavigator($cloud);
+        $navigator = new TargetNavigator(
+            cloud: $cloud,
+            localConfig: new LocalConfig(base_path('.cloud/config.json')),
+            repository: new GitRepository(base_path()),
+        );
         $preferences = new Preferences((string) config('cloud-db-dumper.prefs_file'));
 
         $target = $this->resolveTarget($navigator, $preferences);
@@ -74,7 +82,11 @@ class LaravelCloudDbDumperCommand extends Command
 
     protected function resolveTarget(TargetNavigator $navigator, Preferences $preferences): DatabaseTarget
     {
-        $saved = $this->option('fresh') ? null : $preferences->load();
+        // An explicitly named application or environment is the user telling us
+        // where to go, so the saved target does not get a say.
+        $saved = $this->option('fresh') || $this->hasTargetArguments()
+            ? null
+            : $preferences->load();
 
         $navigator->useOrganization(
             $this->organization() ?? $saved?->organizationName,
@@ -91,10 +103,15 @@ class LaravelCloudDbDumperCommand extends Command
             }
         }
 
-        return spin(
-            fn () => $navigator->navigate(),
-            'Loading Laravel Cloud applications...',
+        return $navigator->navigate(
+            $this->argument('application'),
+            $this->argument('environment'),
         );
+    }
+
+    protected function hasTargetArguments(): bool
+    {
+        return $this->argument('application') !== null || $this->argument('environment') !== null;
     }
 
     protected function produceDump(TargetNavigator $navigator, DumpManager $dumpManager, DatabaseTarget $target): string
@@ -117,10 +134,8 @@ class LaravelCloudDbDumperCommand extends Command
             }
         }
 
-        $target = spin(
-            fn () => $navigator->attachCredentials($target),
-            'Fetching database credentials...',
-        );
+        // The navigator spins around its own CLI calls.
+        $target = $navigator->attachCredentials($target);
 
         $path = spin(
             fn () => $dumpManager->dump($target),

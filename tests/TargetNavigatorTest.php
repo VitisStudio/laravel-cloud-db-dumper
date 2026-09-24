@@ -98,3 +98,102 @@ it('retries with the saved organization token when the cli cannot choose one', f
 
     Process::assertRan(fn ($process) => ($process->environment['LARAVEL_CLOUD_TOKEN'] ?? null) === '2|bbb');
 });
+
+function applicationsFixture(): array
+{
+    return [
+        [
+            'id' => 'app-1',
+            'name' => 'acme-web',
+            'repositoryFullName' => 'acme/web',
+            'defaultEnvironmentId' => 'env-prod',
+            'environments' => [
+                ['id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => 'schema-9'],
+                ['id' => 'env-stg', 'name' => 'staging', 'databaseSchemaId' => 'schema-1'],
+            ],
+        ],
+        [
+            'id' => 'app-2',
+            'name' => 'acme-api',
+            'repositoryFullName' => 'acme/api',
+            'defaultEnvironmentId' => 'env-api',
+            'environments' => [
+                ['id' => 'env-api', 'name' => 'production', 'databaseSchemaId' => 'schema-2'],
+            ],
+        ],
+    ];
+}
+
+it('matches an item by id or by name', function () {
+    $apps = applicationsFixture();
+
+    expect(TargetNavigator::findByIdentifier($apps, 'app-2')['name'])->toBe('acme-api')
+        ->and(TargetNavigator::findByIdentifier($apps, 'acme-web')['id'])->toBe('app-1')
+        ->and(TargetNavigator::findByIdentifier($apps, 'nope'))->toBeNull();
+});
+
+it('filters applications by the repository they deploy from', function () {
+    expect(TargetNavigator::matchingRepository(applicationsFixture(), 'acme/api'))->toHaveCount(1)
+        ->and(TargetNavigator::matchingRepository(applicationsFixture(), 'ACME/API')[0]['id'])->toBe('app-2')
+        ->and(TargetNavigator::matchingRepository(applicationsFixture(), 'someone/else'))->toBe([])
+        ->and(TargetNavigator::matchingRepository(applicationsFixture(), null))->toBe([]);
+});
+
+it('resolves application and environment from identifiers without prompting', function () {
+    Process::fake([
+        '*application:list*' => Process::result(json_encode(applicationsFixture())),
+        '*database-cluster:list*' => Process::result(json_encode([
+            [
+                'id' => 'cluster-b',
+                'name' => 'cluster-b',
+                'type' => 'postgres',
+                'schemas' => [
+                    ['id' => 'schema-1', 'name' => 'acme_staging'],
+                    ['id' => 'schema-9', 'name' => 'acme_production'],
+                ],
+            ],
+        ])),
+    ]);
+
+    $target = (new TargetNavigator(new CloudCli))->navigate('acme-web', 'staging');
+
+    expect($target->applicationId)->toBe('app-1')
+        ->and($target->environmentName)->toBe('staging')
+        ->and($target->schemaName)->toBe('acme_staging')
+        ->and($target->driver())->toBe('pgsql');
+});
+
+it('uses the environments embedded in the application listing', function () {
+    Process::fake([
+        '*application:list*' => Process::result(json_encode([applicationsFixture()[1]])),
+        '*database-cluster:list*' => Process::result(json_encode([
+            [
+                'id' => 'cluster-a',
+                'name' => 'cluster-a',
+                'type' => 'mysql-8',
+                'schemas' => [['id' => 'schema-2', 'name' => 'acme_api']],
+            ],
+        ])),
+    ]);
+
+    // A sole application, a sole environment and a sole database resolve with
+    // no prompts at all.
+    $target = (new TargetNavigator(new CloudCli))->navigate();
+
+    expect($target->applicationName)->toBe('acme-api')
+        ->and($target->environmentName)->toBe('production')
+        ->and($target->schemaName)->toBe('acme_api')
+        ->and($target->driver())->toBe('mysql');
+
+    Process::assertNotRan(fn ($process) => str_contains(
+        is_array($process->command) ? implode(' ', $process->command) : (string) $process->command,
+        'environment:list',
+    ));
+});
+
+it('fails on an identifier that matches no application', function () {
+    Process::fake(['*application:list*' => Process::result(json_encode(applicationsFixture()))]);
+
+    expect(fn () => (new TargetNavigator(new CloudCli))->navigate('ghost-app'))
+        ->toThrow(RuntimeException::class, 'Unable to resolve application "ghost-app"');
+});
