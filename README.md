@@ -12,6 +12,10 @@ fetches the connection credentials for it, dumps it to a file, and optionally re
 database and runs a seeder to scrub what you just pulled down. It only asks about the parts it cannot
 work out for itself.
 
+Dumps are kept, so a later run can restore an earlier snapshot without downloading anything, and
+`--prune` clears them out again. Where policy forbids production data at rest, `--no-store` keeps the
+dump out of your project entirely.
+
 ```bash
 php artisan db:pull
 ```
@@ -73,9 +77,10 @@ The command walks you through it:
 
 1. **Pick a target.** Organization, application, environment, then database. Anything that can be
    worked out is not asked about — see [How the target is resolved](#how-the-target-is-resolved).
-2. **Choose where dumps land.** Defaults to `database/backups`.
-3. **Reuse or refetch.** If a dump for that database already exists from today, you are offered the
-   cached copy instead of downloading it again.
+2. **Choose where dumps land.** Defaults to `database/backups`, and is skipped when dump storage is
+   off.
+3. **Reuse or refetch.** Every dump already on disk for that database is offered, newest first, so you
+   can restore an earlier snapshot instead of downloading anything.
 4. **Restore locally.** Opt in, after an explicit warning naming the local database about to be
    overwritten. Active connections to it are terminated first so the restore is not blocked.
 5. **Seed.** Optionally run one of your seeders against the restored data — the place to scrub
@@ -97,10 +102,14 @@ php artisan db:pull app-9f3c env-2a71
 | ------------------- | ----------------------------------------------------------------- |
 | `application`       | Application ID or name; skips the application prompt              |
 | `environment`       | Environment ID or name; skips the environment prompt              |
-| `--organization=`   | Run against a named Cloud organization (see below)                |
+| `--organization=`   | Run against a named Cloud organization ([details](#multiple-cloud-organizations)) |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
+| `--download`        | Always fetch a fresh dump, ignoring the ones already on disk ([details](#restoring-an-earlier-dump)) |
+| `--no-store`        | Never leave the dump on disk ([details](#keeping-nothing-on-disk)) |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
 | `--no-seed`         | Skip the post-restore seeder step                                 |
+| `--prune`           | Delete the stored dumps and exit ([details](#deleting-stored-dumps)) |
+| `--force`           | Skip the prune confirmation, for scripts                          |
 
 ```bash
 php artisan db:pull staging --no-seed
@@ -156,6 +165,7 @@ CLOUD_ORGANIZATION="Acme Inc"
 | `cloud_binary`  | `CLOUD_BINARY`      | `cloud`                            | Path to the Cloud CLI, if it is not on your `PATH` |
 | `organization`  | `CLOUD_ORGANIZATION`| `null`                             | Pin the Cloud organization                         |
 | `backup_path`   | —                   | `database/backups`                 | Where dumps are written                            |
+| `store_dumps`   | `CLOUD_DB_DUMPER_STORE_DUMPS` | `true`                   | Whether dumps are kept on disk at all              |
 | `prefs_file`    | —                   | `.db-backup-prefs.json`            | Where the last target is remembered                |
 | `binaries`      | see below           | `null` (discover on `PATH`)        | Absolute paths to the database client binaries     |
 
@@ -184,6 +194,94 @@ Both belong in your `.gitignore`:
 
 Database credentials are fetched live from Laravel Cloud on every run and held in memory only. They are
 never written to the preferences file, the dump filename, or console output.
+
+### Restoring an earlier dump
+
+Dumps accumulate under `backup_path`, one per database per day, and every one of them stays restorable.
+On a repeat pull you are shown what is already there:
+
+```
+ ┌ 3 local dumps of acme_production already exist. Use one? ─────┐
+ │   Download a fresh dump                                       │
+ │ › 2026-09-24  (12.4 MB)  — today                              │
+ │   2026-09-20  (12.1 MB)                                       │
+ │   2026-06-25  (9.8 MB)                                        │
+ └───────────────────────────────────────────────────────────────┘
+```
+
+Picking one skips the download entirely — no Cloud credentials are fetched — and restores that file.
+Today's dump is preselected, since that is what a repeat run usually wants; an older snapshot is always
+a deliberate choice. Only dumps of the same database and driver are listed.
+
+Use `--download` to skip the question and always pull afresh:
+
+```bash
+php artisan db:pull --download
+```
+
+Dumps are never deleted behind your back. Clear them out with `--prune` when you want the space back.
+
+### Deleting stored dumps
+
+```bash
+php artisan db:pull --prune
+```
+
+```
+ ┌─────────────────┬────────┬────────────┬────────┐
+ │ Database        │ Driver │ Taken      │ Size   │
+ ├─────────────────┼────────┼────────────┼────────┤
+ │ acme_production │ pgsql  │ 2026-09-24 │ 2.0 KB │
+ │ acme_production │ pgsql  │ 2026-09-20 │ 4.0 KB │
+ │ acme_staging    │ mysql  │ 2026-06-25 │ 1.0 KB │
+ └─────────────────┴────────┴────────────┴────────┘
+
+ Deleting 3 dumps (7.0 KB) from /app/database/backups. This cannot be undone.
+
+ ┌ Delete these dumps? ────────────────────────────┐
+ │ Yes / No                                        │
+ └─────────────────────────────────────────────────┘
+```
+
+Every file is listed with its size and the day it was taken before anything happens, and the
+confirmation defaults to **no**. Pruning never contacts Laravel Cloud — it is a local file operation,
+so there is no application picker to walk first.
+
+**Only dumps this package wrote are ever deleted.** Files are matched against the
+`{database}_{driver}_{date}.sql` naming scheme, so anything else living in that folder is invisible to
+prune and cannot be removed by it, even by accident.
+
+For scripts, `--force` skips the confirmation:
+
+```bash
+php artisan db:pull --prune --force
+```
+
+Without `--force`, a non-interactive run declines and deletes nothing.
+
+### Keeping nothing on disk
+
+A dump is production data sitting on a laptop. Where a data handling policy does not allow that, turn
+storage off and the dump never lands in your project:
+
+```dotenv
+CLOUD_DB_DUMPER_STORE_DUMPS=false
+```
+
+```bash
+php artisan db:pull --no-store
+```
+
+The dump is written to a private temporary directory created at mode `0700`, restored into your local
+database, and deleted before the command exits — including when the restore fails. Same-day caching is
+off in this mode, because there is no longer a file to reuse, so every run downloads afresh.
+
+Setting it in config covers the whole team; `--no-store` covers a single run. `--no-store` together with
+`--no-restore` is refused, since that combination would download a dump and then delete it unused.
+
+The preferences file is a separate thing and is still written. It records the application, environment,
+cluster and database names you picked, and never any credentials — delete it, or point `prefs_file`
+somewhere outside the repository, if even that is more than your policy allows.
 
 ## Contributing
 
