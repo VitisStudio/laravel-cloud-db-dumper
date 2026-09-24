@@ -12,6 +12,10 @@ fetches the connection credentials for it, dumps it to a file, and optionally re
 database and runs a seeder to scrub what you just pulled down. It only asks about the parts it cannot
 work out for itself.
 
+Dumps are kept, so a later run can restore an earlier snapshot without downloading anything, and
+`--prune` clears them out again. Where policy forbids production data at rest, `--no-store` keeps the
+dump out of your project entirely.
+
 ```bash
 php artisan db:pull
 ```
@@ -73,7 +77,8 @@ The command walks you through it:
 
 1. **Pick a target.** Organization, application, environment, then database. Anything that can be
    worked out is not asked about — see [How the target is resolved](#how-the-target-is-resolved).
-2. **Choose where dumps land.** Defaults to `database/backups`.
+2. **Choose where dumps land.** Defaults to `database/backups`, and is skipped when dump storage is
+   off.
 3. **Reuse or refetch.** Every dump already on disk for that database is offered, newest first, so you
    can restore an earlier snapshot instead of downloading anything.
 4. **Restore locally.** Opt in, after an explicit warning naming the local database about to be
@@ -97,14 +102,14 @@ php artisan db:pull app-9f3c env-2a71
 | ------------------- | ----------------------------------------------------------------- |
 | `application`       | Application ID or name; skips the application prompt              |
 | `environment`       | Environment ID or name; skips the environment prompt              |
-| `--organization=`   | Run against a named Cloud organization (see below)                |
-| `--download`        | Always fetch a fresh dump, ignoring the ones already on disk      |
-| `--prune`           | Delete the locally stored dumps and exit (see below)              |
-| `--force`           | Skip the prune confirmation, for scripts                          |
-| `--no-store`        | Never leave the dump on disk (see below)                          |
+| `--organization=`   | Run against a named Cloud organization ([details](#multiple-cloud-organizations)) |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
+| `--download`        | Always fetch a fresh dump, ignoring the ones already on disk ([details](#restoring-an-earlier-dump)) |
+| `--no-store`        | Never leave the dump on disk ([details](#keeping-nothing-on-disk)) |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
 | `--no-seed`         | Skip the post-restore seeder step                                 |
+| `--prune`           | Delete the stored dumps and exit ([details](#deleting-stored-dumps)) |
+| `--force`           | Skip the prune confirmation, for scripts                          |
 
 ```bash
 php artisan db:pull staging --no-seed
