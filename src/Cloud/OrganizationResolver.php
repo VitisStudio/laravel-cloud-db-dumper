@@ -49,14 +49,23 @@ class OrganizationResolver
             return $this->entry($tokens[0]);
         }
 
+        // Keys are prefixed because PHP turns "0", "1", "2" back into integers,
+        // which makes this a list — and Laravel Prompts hands back the value
+        // rather than the key for a list, so every choice looked like the first.
         $options = [];
         foreach ($tokens as $index => $token) {
-            $options[(string) $index] = (string) $token['organization'];
+            $options['token-'.$index] = (string) $token['organization'];
         }
 
-        $selected = (int) select(label: 'Select a Laravel Cloud organization', options: $options);
+        $selected = (string) select(label: 'Organization', options: $options, scroll: 10);
 
-        return $this->entry($tokens[$selected]);
+        $index = (int) substr($selected, strlen('token-'));
+
+        if (! isset($tokens[$index])) {
+            throw new RuntimeException('Selected organization could not be resolved.');
+        }
+
+        return $this->entry($tokens[$index]);
     }
 
     /**

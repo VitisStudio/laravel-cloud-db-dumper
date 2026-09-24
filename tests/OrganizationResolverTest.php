@@ -1,8 +1,20 @@
 <?php
 
 use Illuminate\Support\Facades\Process;
+use Laravel\Prompts\Key;
+use Laravel\Prompts\Prompt;
+use Laravel\Prompts\Terminal;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
 use VitisStudio\LaravelCloudDbDumper\Cloud\OrganizationResolver;
+
+afterEach(function () {
+    // Prompt::fake() installs a Mockery terminal and forces interactive mode,
+    // both static. Left in place, the next prompt reads from an exhausted mock
+    // and spins until the suite runs out of memory.
+    $prompt = new ReflectionClass(Prompt::class);
+    $prompt->setStaticPropertyValue('terminal', new Terminal);
+    Prompt::interactive(false);
+});
 
 function tokensFixture(): array
 {
@@ -42,4 +54,20 @@ it('throws when no tokens are saved', function () {
 
     expect(fn () => (new OrganizationResolver(new CloudCli))->resolve())
         ->toThrow(RuntimeException::class, 'No Laravel Cloud API tokens found.');
+});
+
+it('resolves the organization the user actually picked', function () {
+    Process::fake(['*' => Process::result(json_encode([
+        ['token' => '1|aaa', 'source' => 'config.json', 'organization' => 'Dan Poblete'],
+        ['token' => '2|bbb', 'source' => 'config.json', 'organization' => 'Sidecar'],
+        ['token' => '3|ccc', 'source' => 'config.json', 'organization' => 'Ram Jack Systems Distribution'],
+    ]))]);
+
+    // Down twice lands on the third organization.
+    Prompt::fake([Key::DOWN, Key::DOWN, Key::ENTER]);
+
+    $resolved = (new OrganizationResolver(new CloudCli))->resolve();
+
+    expect($resolved['organization'])->toBe('Ram Jack Systems Distribution')
+        ->and($resolved['token'])->toBe('3|ccc');
 });
