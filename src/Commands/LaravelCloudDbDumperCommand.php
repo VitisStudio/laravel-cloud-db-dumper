@@ -7,7 +7,6 @@ use Illuminate\Support\Carbon;
 use RuntimeException;
 use Throwable;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
-use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCliException;
 use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 use VitisStudio\LaravelCloudDbDumper\Cloud\LocalConfig;
 use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
@@ -46,14 +45,6 @@ class LaravelCloudDbDumperCommand extends Command
     {
         try {
             return $this->option('prune') ? $this->prune() : $this->backup();
-        } catch (CloudCliException $e) {
-            // A failure from the CLI is worth a second look: an out-of-date
-            // binary produces errors that say nothing about being out of date.
-            $hint = $this->cloud()->outdatedHint();
-
-            $this->components->error(trim($e->getMessage()."\n\n".$hint));
-
-            return self::FAILURE;
         } catch (Throwable $e) {
             $this->components->error($e->getMessage());
 
@@ -138,6 +129,12 @@ class LaravelCloudDbDumperCommand extends Command
         }
 
         $cloud = $this->cloud();
+
+        // Before any prompting or network work, so an unusable CLI is named
+        // immediately rather than after the user has picked their way down to
+        // the database.
+        $cloud->ensureSupportedVersion();
+
         $navigator = new TargetNavigator(
             cloud: $cloud,
             localConfig: new LocalConfig(base_path('.cloud/config.json')),

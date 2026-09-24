@@ -3,18 +3,8 @@
 use Illuminate\Support\Facades\Process;
 use Laravel\Prompts\Key;
 use Laravel\Prompts\Prompt;
-use Laravel\Prompts\Terminal;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
 use VitisStudio\LaravelCloudDbDumper\Cloud\OrganizationResolver;
-
-afterEach(function () {
-    // Prompt::fake() installs a Mockery terminal and forces interactive mode,
-    // both static. Left in place, the next prompt reads from an exhausted mock
-    // and spins until the suite runs out of memory.
-    $prompt = new ReflectionClass(Prompt::class);
-    $prompt->setStaticPropertyValue('terminal', new Terminal);
-    Prompt::interactive(false);
-});
 
 function tokensFixture(): array
 {

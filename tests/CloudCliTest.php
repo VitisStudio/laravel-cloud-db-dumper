@@ -134,24 +134,38 @@ it('parses the cli version out of its banner', function () {
         ->and(CloudCli::parseVersion('no version here'))->toBeNull();
 });
 
-it('explains an out-of-date cli instead of leaving a bare api error', function () {
+it('refuses to run against a cli that is too old', function () {
     Process::fake(['*' => Process::result(' Cloud  v0.5.2')]);
 
-    $hint = (new CloudCli)->outdatedHint();
-
-    expect($hint)->toContain('v0.5.2')
-        ->and($hint)->toContain('v'.CloudCli::MINIMUM_VERSION)
-        ->and($hint)->toContain('composer global update laravel/cloud-cli');
+    expect(fn () => (new CloudCli)->ensureSupportedVersion())
+        ->toThrow(CloudCliException::class, 'The cloud CLI is v0.5.2');
 });
 
-it('stays quiet when the cli is new enough', function () {
-    Process::fake(['*' => Process::result(' Cloud  v0.6.1')]);
+it('accepts a cli at or above the minimum', function (string $version) {
+    Process::fake(['*' => Process::result(" Cloud  v{$version}")]);
 
-    expect((new CloudCli)->outdatedHint())->toBeNull();
-});
+    (new CloudCli)->ensureSupportedVersion();
+})->with(['0.5.3', '0.6.1', '1.0.0'])->throwsNoExceptions();
 
-it('stays quiet when the version cannot be determined', function () {
+it('does not block a cli whose version it cannot read', function () {
     Process::fake(['*' => Process::result(output: '', errorOutput: 'not found', exitCode: 127)]);
 
-    expect((new CloudCli)->outdatedHint())->toBeNull();
+    (new CloudCli)->ensureSupportedVersion();
+})->throwsNoExceptions();
+
+it('checks the version before it walks the user through any pickers', function () {
+    Process::fake([
+        '*--version*' => Process::result(' Cloud  v0.5.2'),
+        '*' => Process::result(json_encode([])),
+    ]);
+
+    $this->artisan('db:pull')
+        ->assertFailed()
+        ->expectsOutputToContain('The cloud CLI is v0.5.2');
+
+    // Nothing was fetched: the run stopped at the gate.
+    Process::assertNotRan(fn ($process) => str_contains(
+        is_array($process->command) ? implode(' ', $process->command) : (string) $process->command,
+        'application:list',
+    ));
 });

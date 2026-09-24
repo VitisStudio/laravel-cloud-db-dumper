@@ -100,20 +100,25 @@ class CloudCli
     }
 
     /**
-     * Advice to add to a failure when the CLI is too old to be trusted, or
-     * null when its version is fine or unknown.
+     * Fail before doing any work if the installed CLI is known to be too old.
+     *
+     * An unreadable version is not treated as a failure: a wrapper script or a
+     * custom build should not be blocked on the strength of a guess.
      */
-    public function outdatedHint(): ?string
+    public function ensureSupportedVersion(): void
     {
         $version = $this->version();
 
         if ($version === null || version_compare($version, self::MINIMUM_VERSION, '>=')) {
-            return null;
+            return;
         }
 
-        return "The cloud CLI is v{$version}; this package needs v".self::MINIMUM_VERSION
-            .' or newer. Older versions ask the Laravel Cloud API for an include it rejects, '
-            .'which fails every database lookup. Update with `composer global update laravel/cloud-cli`.';
+        throw new CloudCliException(
+            "The cloud CLI is v{$version}; this package needs v".self::MINIMUM_VERSION
+            .' or newer. Older versions ask the Laravel Cloud API for an include it rejects, so'
+            ." every database lookup fails with a bare 400.\n\n"
+            .'Update it with: composer global update laravel/cloud-cli'
+        );
     }
 
     /**

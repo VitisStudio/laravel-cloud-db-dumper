@@ -67,9 +67,11 @@ composer global require laravel/cloud-cli
 cloud auth
 ```
 
-Keep the CLI current. Versions before 0.5.3 ask the Laravel Cloud API for an include it no longer
-allows, so every database lookup fails with a bare `400 Bad Request` that says nothing about versions.
-`db:pull` detects that case and tells you to run `composer global update laravel/cloud-cli`.
+`db:pull` checks the CLI version before it does anything else and stops if it is older than 0.5.3.
+Those versions ask the Laravel Cloud API for an include it no longer allows, so every database lookup
+fails with a bare `400 Bad Request` that says nothing about versions. The check runs up front rather
+than letting you pick your way down to a database first, and it only blocks on a version it could
+actually read — a wrapper script or custom build is left alone.
 
 ## Usage
 
