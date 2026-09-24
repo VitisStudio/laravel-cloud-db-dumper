@@ -1,27 +1,27 @@
 [
   {
-    "organization": "Dan Poblete",
+    "organization": "Example Org",
     "token": "[redacted]",
-    "source": "/Users/vitis/.config/cloud/config.json"
+    "source": "/home/user/.config/cloud/config.json"
   },
   {
-    "organization": "Sidecar",
+    "organization": "Second Org",
     "token": "[redacted]",
-    "source": "/Users/vitis/.config/cloud/config.json"
+    "source": "/home/user/.config/cloud/config.json"
   },
   {
-    "organization": "CampLucky",
+    "organization": "Third Org",
     "token": "[redacted]",
-    "source": "/Users/vitis/.config/cloud/config.json"
+    "source": "/home/user/.config/cloud/config.json"
   },
   {
-    "organization": "Vitis Studio",
+    "organization": "Fourth Org",
     "token": "[redacted]",
-    "source": "/Users/vitis/.config/cloud/config.json"
+    "source": "/home/user/.config/cloud/config.json"
   },
   {
-    "organization": "Ram Jack Systems Distribution",
+    "organization": "Fifth Org",
     "token": "[redacted]",
-    "source": "/Users/vitis/.config/cloud/config.json"
+    "source": "/home/user/.config/cloud/config.json"
   }
 ]
