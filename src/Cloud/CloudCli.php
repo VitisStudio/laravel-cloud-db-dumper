@@ -90,6 +90,30 @@ class CloudCli
     }
 
     /**
+     * A single environment, fetched in full.
+     *
+     * A listing carries partial environments — notably without the `database`
+     * relationship that databaseSchemaId is derived from — so anything needing
+     * that field has to ask for the environment directly.
+     *
+     * @return array<string, mixed>
+     */
+    public function environment(string $environmentId): array
+    {
+        return $this->json(['environment:get', $environmentId]);
+    }
+
+    /**
+     * Databases (schemas) in a cluster.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function databases(string $clusterId): array
+    {
+        return $this->json(['database:list', $clusterId]);
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function clusters(): array

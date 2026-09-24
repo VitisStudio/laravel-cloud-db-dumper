@@ -83,10 +83,19 @@ class TargetNavigator
             (string) ($application['defaultEnvironmentId'] ?? ''),
         );
 
-        $clusters = $this->call(fn (CloudCli $cloud) => $cloud->clusters(), 'Fetching database clusters...');
-        $cluster = $this->resolveCluster($clusters, (string) ($environment['databaseSchemaId'] ?? ''));
+        $schemaId = $this->schemaIdFor($environment);
 
-        $schema = $this->chooseSchema($cluster, (string) ($environment['databaseSchemaId'] ?? ''));
+        $clusters = $this->call(fn (CloudCli $cloud) => $cloud->clusters(), 'Fetching database clusters...');
+
+        if ($clusters === []) {
+            throw new RuntimeException('No database clusters found for this organization.');
+        }
+
+        // Match the environment to its cluster where we can, and simply ask
+        // when we cannot, rather than dead-ending on a lookup failure.
+        $cluster = self::findCluster($clusters, $schemaId) ?? $this->chooseCluster($clusters);
+
+        $schema = $this->chooseSchema($cluster, $schemaId);
 
         return new DatabaseTarget(
             applicationId: (string) $application['id'],
@@ -126,22 +135,51 @@ class TargetNavigator
     }
 
     /**
-     * Find the cluster that owns the given schema id (pure).
+     * Find the cluster that owns the given schema id, or null (pure).
      *
      * @param  array<int, array<string, mixed>>  $clusters
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    public function resolveCluster(array $clusters, string $schemaId): array
+    public static function findCluster(array $clusters, string $schemaId): ?array
     {
+        if ($schemaId === '') {
+            return null;
+        }
+
         foreach ($clusters as $cluster) {
             foreach ($cluster['schemas'] ?? [] as $schema) {
-                if ((string) ($schema['id'] ?? '') === $schemaId && $schemaId !== '') {
+                if ((string) ($schema['id'] ?? '') === $schemaId) {
                     return $cluster;
                 }
             }
         }
 
-        throw new RuntimeException('Could not find a database cluster for the selected environment.');
+        return null;
+    }
+
+    /**
+     * The schema id an environment is wired to.
+     *
+     * A listing gives partial environments, so when the id is absent the
+     * environment is re-fetched in full — the same thing the cloud CLI's own
+     * resolver does before it needs the relationship data.
+     *
+     * @param  array<string, mixed>  $environment
+     */
+    protected function schemaIdFor(array $environment): string
+    {
+        $schemaId = (string) ($environment['databaseSchemaId'] ?? '');
+
+        if ($schemaId !== '') {
+            return $schemaId;
+        }
+
+        $full = $this->call(
+            fn (CloudCli $cloud) => $cloud->environment((string) $environment['id']),
+            'Fetching environment...',
+        );
+
+        return (string) ($full['databaseSchemaId'] ?? '');
     }
 
     /**
@@ -307,6 +345,22 @@ class TargetNavigator
     }
 
     /**
+     * Pick a cluster when the environment could not be matched to one, taking
+     * a sole candidate without asking.
+     *
+     * @param  array<int, array<string, mixed>>  $clusters
+     * @return array<string, mixed>
+     */
+    protected function chooseCluster(array $clusters): array
+    {
+        if (count($clusters) === 1) {
+            return $this->resolved('Database cluster', $clusters[0]);
+        }
+
+        return $this->choose('Database cluster', $clusters);
+    }
+
+    /**
      * Select a schema within a cluster, defaulting to the one the environment
      * is wired to.
      *
@@ -316,6 +370,15 @@ class TargetNavigator
     protected function chooseSchema(array $cluster, string $environmentSchemaId): array
     {
         $schemas = $cluster['schemas'] ?? [];
+
+        // A cluster listing does not always carry its databases, so ask for
+        // them directly rather than concluding the cluster is empty.
+        if (! is_array($schemas) || $schemas === []) {
+            $schemas = $this->call(
+                fn (CloudCli $cloud) => $cloud->databases((string) $cluster['id']),
+                'Fetching databases...',
+            );
+        }
 
         if ($schemas === []) {
             throw new RuntimeException("Cluster \"{$cluster['name']}\" has no databases.");
