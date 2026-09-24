@@ -1,0 +1,183 @@
+{
+  "id": "env-66666666-7777-8888-9999-aaaaaaaaaaaa",
+  "url": "https://example.laravel.cloud",
+  "name": "production",
+  "branch": "main",
+  "status": "running",
+  "instances": [
+    "inst-a26e1a60-4db7-44fb-ac87-85f249ac3dc8"
+  ],
+  "buildCommand": "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader\n\nnpm ci --audit false\nnpm run build\n\ncomposer build",
+  "deployCommand": "composer deploy",
+  "slug": "main",
+  "statusEnum": "running",
+  "createdFromAutomation": false,
+  "vanityDomain": "https://example.laravel.cloud",
+  "phpMajorVersion": "8.5",
+  "nodeVersion": "24",
+  "usesOctane": false,
+  "usesHibernation": true,
+  "usesPushToDeploy": true,
+  "usesDeployHook": false,
+  "environmentVariables": [
+    {
+      "key": "APP_KEY",
+      "value": "*****"
+    },
+    {
+      "key": "INTACCT_SENDER_ID",
+      "value": "*****"
+    },
+    {
+      "key": "INTACCT_COMPANY_ID",
+      "value": "*****"
+    },
+    {
+      "key": "INTACCT_WEBSERVICE_USERNAME",
+      "value": "*****"
+    },
+    {
+      "key": "INTACCT_CLIENT_ID",
+      "value": "*****"
+    },
+    {
+      "key": "INTACCT_CLIENT_SECRET",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_MAILER",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_HOST",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_PORT",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_USERNAME",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_PASSWORD",
+      "value": "*****"
+    },
+    {
+      "key": "MAIL_FROM_ADDRESS",
+      "value": "*****"
+    },
+    {
+      "key": "RESEND_API_KEY",
+      "value": "*****"
+    },
+    {
+      "key": "RESEND_WEBHOOK_SECRET",
+      "value": "*****"
+    },
+    {
+      "key": "CA_API_BASE_URL",
+      "value": "*****"
+    },
+    {
+      "key": "CA_TX_API_USERNAME",
+      "value": "*****"
+    },
+    {
+      "key": "CA_TX_API_PASSWORD",
+      "value": "*****"
+    },
+    {
+      "key": "CA_OK_API_USERNAME",
+      "value": "*****"
+    },
+    {
+      "key": "CA_OK_API_PASSWORD",
+      "value": "*****"
+    },
+    {
+      "key": "CA_TX_INBOUND_ADDRESS",
+      "value": "*****"
+    },
+    {
+      "key": "CA_OK_INBOUND_ADDRESS",
+      "value": "*****"
+    },
+    {
+      "key": "CA_SYNC_ENABLED",
+      "value": "*****"
+    }
+  ],
+  "networkSettings": {
+    "cache": {
+      "strategy": "default"
+    },
+    "response_headers": {
+      "frame": "deny",
+      "content_type": "nosniff",
+      "robots_tag": "index, follow",
+      "hsts": {
+        "max_age": null,
+        "include_subdomains": false,
+        "preload": false
+      }
+    },
+    "firewall": {
+      "bot_categories": [],
+      "rate_limit": {
+        "level": null,
+        "per_minute": null,
+        "4xx": false,
+        "429": false
+      },
+      "under_attack_mode_started_at": null,
+      "block_path": true,
+      "browser_integrity_check": true,
+      "social_preview_crawlers": true
+    },
+    "content_converter": false
+  },
+  "createdAt": "2026-08-05T13:48:46.000000Z",
+  "updatedAt": null,
+  "application": {
+    "id": "app-11111111-2222-3333-4444-555555555555",
+    "name": "production",
+    "slug": "main",
+    "region": "blue-brook-70289993",
+    "environmentIds": [],
+    "deploymentIds": [],
+    "repositoryFullName": "example",
+    "repositoryBranch": "main",
+    "slackChannel": null,
+    "avatarUrl": null,
+    "rootDirectory": "projects/admin",
+    "createdAt": "2026-08-05T13:48:44.000000Z",
+    "repositoryId": null,
+    "organizationId": null,
+    "defaultEnvironmentId": null,
+    "organization": null,
+    "environments": [],
+    "deployments": []
+  },
+  "branchId": null,
+  "deploymentIds": [
+    "depl-a2d18e7e-8869-4656-95f4-d97505fa0e60",
+    "depl-a2d160f1-9302-4662-8d0e-d4279ebb4d13",
+    "depl-a2d15351-cb8f-4792-b69f-32f78c82258a",
+    "depl-a2d10b1b-5fc8-4eb7-a402-abe74190553c",
+    "depl-a2d104b1-b3f9-49af-bb67-62e49dfa81fd",
+    "depl-a2d0e6f7-d0a6-4b3f-9fe7-5b4e26404a4e",
+    "depl-a2d0d2e4-5851-4604-ae6a-85d443546e28",
+    "depl-a2d0b467-b49b-4e2c-918b-a37fc34b3775",
+    "depl-a2d0b132-038f-4d51-8bf3-5b908e0ef8fc",
+    "depl-a2cf631e-4fed-460a-ad06-f784ad5536fa"
+  ],
+  "currentDeploymentId": "depl-a2d18e7e-8869-4656-95f4-d97505fa0e60",
+  "domainIds": [],
+  "primaryDomainId": "domain-a2b8a85d-3cd0-42f9-9bc4-646a19168e4b",
+  "databaseSchemaId": "66023719",
+  "cacheId": null,
+  "websocketApplicationId": null,
+  "secrets": []
+}

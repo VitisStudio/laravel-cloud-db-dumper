@@ -30,10 +30,20 @@ class CloudCliException extends RuntimeException
             || str_contains($this->getMessage(), 'Unable to resolve organization');
     }
 
+    /**
+     * Whether the CLI rejected our credentials.
+     *
+     * A rejected token surfaces as the API's own wording, not the CLI's: the
+     * request never reaches the CLI's error handling. The two phrases the CLI
+     * does emit for this are printed through channels that `--json -n`
+     * suppresses, so matching them alone matched nothing.
+     */
     public function requiresAuthentication(): bool
     {
-        return str_contains($this->getMessage(), 'Not authenticated')
-            || str_contains($this->getMessage(), 'no longer valid')
-            || str_contains($this->getMessage(), 'was rejected');
+        $message = $this->getMessage();
+
+        return str_contains($message, 'Not authenticated')
+            || stripos($message, 'Invalid API token') !== false
+            || preg_match('/\bUnauthorized\b|\b401\b/i', $message) === 1;
     }
 }

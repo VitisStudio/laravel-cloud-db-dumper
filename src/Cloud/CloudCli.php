@@ -2,6 +2,7 @@
 
 namespace VitisStudio\LaravelCloudDbDumper\Cloud;
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Process;
 
 /**
@@ -21,6 +22,20 @@ class CloudCli
      * database-cluster:list fails with a 400 that says nothing about versions.
      */
     public const MINIMUM_VERSION = '0.5.3';
+
+    /**
+     * Line prefixes other extensions and tools write into the CLI's streams.
+     */
+    public const NOISE_PREFIXES = [
+        'Xdebug:',
+        'PHP Deprecated:',
+        'PHP Warning:',
+        'PHP Notice:',
+        'Deprecated:',
+        'Warning:',
+        'Notice:',
+        'Do not run Composer as root',
+    ];
 
     public function __construct(
         protected readonly string $binary = 'cloud',
@@ -129,6 +144,27 @@ class CloudCli
     public function clusterWithCredentials(string $clusterId): array
     {
         return $this->json(['database-cluster:get', $clusterId, '--show-sensitive']);
+    }
+
+    /**
+     * Render an argv list as a command someone could actually paste (pure).
+     *
+     * The token is named, never printed: the point is that the reader can see
+     * the run was authenticated differently from a bare shell, which is why
+     * pasting the bare command may behave differently.
+     *
+     * @param  array<int, string>  $argv
+     */
+    public static function describe(array $argv, bool $forwardsToken = false): string
+    {
+        $quoted = array_map(
+            fn (string $argument) => preg_match('/^[A-Za-z0-9_@%+=:,.\/-]+$/', $argument) === 1
+                ? $argument
+                : "'".str_replace("'", "'\\''", $argument)."'",
+            $argv,
+        );
+
+        return ($forwardsToken ? 'LARAVEL_CLOUD_TOKEN=<resolved token> ' : '').implode(' ', $quoted);
     }
 
     /**
@@ -249,11 +285,65 @@ class CloudCli
     public static function withoutNoise(string $raw): string
     {
         $lines = array_filter(
-            preg_split('/\R/', $raw) ?: [],
-            fn (string $line) => trim($line) !== '' && ! str_starts_with(trim($line), 'Xdebug:'),
+            array_map('rtrim', preg_split('/\R/', $raw) ?: []),
+            function (string $line) {
+                $line = trim($line);
+
+                if ($line === '') {
+                    return false;
+                }
+
+                foreach (self::NOISE_PREFIXES as $prefix) {
+                    if (str_starts_with($line, $prefix)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            },
         );
 
         return trim(implode("\n", $lines));
+    }
+
+    /**
+     * Pull the message out of a Symfony exception block (pure).
+     *
+     * An HTTP failure never reaches the CLI's own JSON error handler, so it is
+     * rendered as a bordered block on stdout. The useful sentence is the frame
+     * after the first "In <file> line N:", hard-wrapped across several lines.
+     */
+    public static function symfonyErrorMessage(string $raw): ?string
+    {
+        $lines = array_map('trim', preg_split('/\R/', self::withoutNoise($raw)) ?: []);
+
+        $start = null;
+        foreach ($lines as $i => $line) {
+            if (preg_match('/^In [^\s]+ line \d+:$/', $line) === 1) {
+                $start = $i + 1;
+
+                break;
+            }
+        }
+
+        if ($start === null) {
+            return null;
+        }
+
+        $message = [];
+        for ($i = $start; $i < count($lines); $i++) {
+            if (preg_match('/^In [^\s]+ line \d+:$/', $lines[$i]) === 1) {
+                break;
+            }
+
+            if ($lines[$i] !== '') {
+                $message[] = $lines[$i];
+            }
+        }
+
+        $joined = trim(preg_replace('/\s+/', ' ', implode(' ', $message)) ?? '');
+
+        return $joined !== '' ? $joined : null;
     }
 
     /**
@@ -264,24 +354,38 @@ class CloudCli
      */
     protected function json(array $command): array
     {
-        $invocation = $this->binary.' '.implode(' ', $command);
+        $argv = [$this->binary, ...$command, '--json', '-n', '--no-ansi'];
+        $invocation = self::describe($argv, $this->apiToken !== null);
 
-        // The cloud CLI is itself a PHP program, so it inherits this process's
-        // Xdebug settings and writes step-debug warnings into the very streams
-        // we parse. Turn that off for the child only.
-        $environment = ['XDEBUG_MODE' => 'off'];
+        $environment = [
+            // The cloud CLI is itself a PHP program, so it inherits this
+            // process's Xdebug settings and writes step-debug warnings into the
+            // very streams we parse. Turn that off for the child only.
+            'XDEBUG_MODE' => 'off',
+            // Always set, never merely added when we have one: Symfony merges
+            // our variables over the inherited environment, so an ambient
+            // LARAVEL_CLOUD_TOKEN left over from CI or a shell profile would
+            // otherwise authenticate every call and silently override the
+            // organization we just resolved. False unsets it for the child.
+            'LARAVEL_CLOUD_TOKEN' => $this->apiToken ?? false,
+            // -n is not enough on its own: the CLI decides whether it may
+            // prompt by looking at stdin and at the CI variables.
+            'CI' => '1',
+        ];
 
-        if ($this->apiToken !== null) {
-            $environment['LARAVEL_CLOUD_TOKEN'] = $this->apiToken;
+        try {
+            $result = Process::env($environment)
+                ->timeout(180)
+                ->input('')
+                ->run($argv);
+        } catch (ProcessTimedOutException) {
+            throw new CloudCliException(
+                "The cloud CLI stopped responding while running `{$invocation}`.\n\n"
+                .'It most likely tried to re-authenticate in a browser because every saved token was '
+                .'rejected. Run `cloud auth` to sign in again, then retry.',
+                $invocation,
+            );
         }
-
-        $result = Process::env($environment)->run([
-            $this->binary,
-            ...$command,
-            '--json',
-            '-n',
-            '--no-ansi',
-        ]);
 
         $output = trim($result->output());
         $errorOutput = trim($result->errorOutput());
@@ -301,7 +405,10 @@ class CloudCli
         if (! $result->successful()) {
             // Both streams, because a failing run may put its explanation on
             // either one, and whichever we ignore is the one that mattered.
-            $reported = self::withoutNoise(trim($errorOutput."\n".$output));
+            // An HTTP failure never reaches the CLI's JSON error handler and
+            // arrives as a bordered Symfony block on stdout instead.
+            $streams = trim($errorOutput."\n".$output);
+            $reported = self::symfonyErrorMessage($streams) ?? self::withoutNoise($streams);
 
             throw new CloudCliException(
                 trim("Cloud CLI command failed: `{$invocation}`.\n".$reported),

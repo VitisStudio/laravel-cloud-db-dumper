@@ -77,11 +77,7 @@ class TargetNavigator
             throw new RuntimeException("No environments found for application \"{$application['name']}\".");
         }
 
-        $environment = $this->resolveEnvironment(
-            $environments,
-            $environment,
-            (string) ($application['defaultEnvironmentId'] ?? ''),
-        );
+        $environment = $this->resolveEnvironment($environments, $environment, $this->defaultEnvironmentId($environments));
 
         $schemaId = $this->schemaIdFor($environment);
 
@@ -293,20 +289,46 @@ class TargetNavigator
     }
 
     /**
-     * Environments for an application, preferring the ones `application:list`
-     * already embedded over a second round trip.
+     * Which environment to preselect.
+     *
+     * `application:list` reports defaultEnvironmentId as null — it does not ask
+     * the API to include that relationship — so it cannot be used. Prefer the
+     * project's pinned environment, then one plainly named for production.
+     *
+     * @param  array<int, array<string, mixed>>  $environments
+     */
+    protected function defaultEnvironmentId(array $environments): string
+    {
+        $pinned = $this->localConfig?->environmentId();
+
+        if ($pinned !== null && self::findByIdentifier($environments, $pinned) !== null) {
+            return $pinned;
+        }
+
+        foreach ($environments as $environment) {
+            if (strcasecmp((string) ($environment['name'] ?? ''), 'production') === 0) {
+                return (string) $environment['id'];
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Environments for an application.
+     *
+     * The ones `application:list` embeds look complete but are not: the API
+     * returns a relationship only when a request asks to include it, and that
+     * command asks for neither `database` nor `defaultEnvironment`. So the
+     * embedded rows carry a null databaseSchemaId, which is the one field the
+     * whole cluster lookup turns on. Asking for the listing directly costs one
+     * call and saves the environment:get that guessing otherwise forces.
      *
      * @param  array<string, mixed>  $application
      * @return array<int, array<string, mixed>>
      */
     protected function environmentsFor(array $application): array
     {
-        $environments = $application['environments'] ?? [];
-
-        if (is_array($environments) && $environments !== []) {
-            return array_values($environments);
-        }
-
         return $this->call(
             fn (CloudCli $cloud) => $cloud->environments((string) $application['id']),
             'Fetching environments...',
@@ -428,7 +450,7 @@ class TargetNavigator
      */
     protected function resolved(string $label, array $item): array
     {
-        note("{$label}: ".(string) ($item['name'] ?? $item['id'] ?? '?'));
+        note("{$label}: ".(string) $item['name']);
 
         return $item;
     }

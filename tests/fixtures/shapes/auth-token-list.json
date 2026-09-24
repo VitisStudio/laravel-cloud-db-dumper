@@ -1,0 +1,27 @@
+[
+  {
+    "organization": "Dan Poblete",
+    "token": "[redacted]",
+    "source": "/Users/vitis/.config/cloud/config.json"
+  },
+  {
+    "organization": "Sidecar",
+    "token": "[redacted]",
+    "source": "/Users/vitis/.config/cloud/config.json"
+  },
+  {
+    "organization": "CampLucky",
+    "token": "[redacted]",
+    "source": "/Users/vitis/.config/cloud/config.json"
+  },
+  {
+    "organization": "Vitis Studio",
+    "token": "[redacted]",
+    "source": "/Users/vitis/.config/cloud/config.json"
+  },
+  {
+    "organization": "Ram Jack Systems Distribution",
+    "token": "[redacted]",
+    "source": "/Users/vitis/.config/cloud/config.json"
+  }
+]
