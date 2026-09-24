@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-cloud-db-dumper` will be documented in this file.
 
+## v0.2.1 - Cloud CLI compatibility fixes - 2026-09-24
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Bug fixes
+
+* Make db:pull work end to end against Laravel Cloud by @acepoblete in https://github.com/VitisStudio/laravel-cloud-db-dumper/pull/6
+
+**Full Changelog**: https://github.com/VitisStudio/laravel-cloud-db-dumper/compare/v0.2.0...v0.2.1
+
 ## v0.2.0 - Storage controls and CLI-style resolution - 2026-09-24
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
