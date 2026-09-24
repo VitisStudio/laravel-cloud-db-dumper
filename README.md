@@ -74,8 +74,8 @@ The command walks you through it:
 1. **Pick a target.** Organization, application, environment, then database. Anything that can be
    worked out is not asked about — see [How the target is resolved](#how-the-target-is-resolved).
 2. **Choose where dumps land.** Defaults to `database/backups`.
-3. **Reuse or refetch.** If a dump for that database already exists from today, you are offered the
-   cached copy instead of downloading it again.
+3. **Reuse or refetch.** Every dump already on disk for that database is offered, newest first, so you
+   can restore an earlier snapshot instead of downloading anything.
 4. **Restore locally.** Opt in, after an explicit warning naming the local database about to be
    overwritten. Active connections to it are terminated first so the restore is not blocked.
 5. **Seed.** Optionally run one of your seeders against the restored data — the place to scrub
@@ -98,6 +98,7 @@ php artisan db:pull app-9f3c env-2a71
 | `application`       | Application ID or name; skips the application prompt              |
 | `environment`       | Environment ID or name; skips the environment prompt              |
 | `--organization=`   | Run against a named Cloud organization (see below)                |
+| `--download`        | Always fetch a fresh dump, ignoring the ones already on disk      |
 | `--no-store`        | Never leave the dump on disk (see below)                          |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
@@ -186,6 +187,32 @@ Both belong in your `.gitignore`:
 
 Database credentials are fetched live from Laravel Cloud on every run and held in memory only. They are
 never written to the preferences file, the dump filename, or console output.
+
+### Restoring an earlier dump
+
+Dumps accumulate under `backup_path`, one per database per day, and every one of them stays restorable.
+On a repeat pull you are shown what is already there:
+
+```
+ ┌ 3 local dumps of acme_production already exist. Use one? ─────┐
+ │   Download a fresh dump                                       │
+ │ › 2026-09-24  (12.4 MB)  — today                              │
+ │   2026-09-20  (12.1 MB)                                       │
+ │   2026-06-25  (9.8 MB)                                        │
+ └───────────────────────────────────────────────────────────────┘
+```
+
+Picking one skips the download entirely — no Cloud credentials are fetched — and restores that file.
+Today's dump is preselected, since that is what a repeat run usually wants; an older snapshot is always
+a deliberate choice. Only dumps of the same database and driver are listed.
+
+Use `--download` to skip the question and always pull afresh:
+
+```bash
+php artisan db:pull --download
+```
+
+Dumps are never deleted for you. Prune `database/backups` when you want the disk space back.
 
 ### Keeping nothing on disk
 

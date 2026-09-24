@@ -3,6 +3,7 @@
 namespace VitisStudio\LaravelCloudDbDumper\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use RuntimeException;
 use Throwable;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
@@ -30,6 +31,7 @@ class LaravelCloudDbDumperCommand extends Command
         {environment? : The environment ID or name}
         {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
+        {--download : Always download a fresh dump, ignoring any already on disk}
         {--no-store : Do not keep the dump on disk; restore from a temporary file and delete it}
         {--no-restore : Dump only; do not restore into the local database}
         {--no-seed : Skip the post-restore seeder step}';
@@ -140,21 +142,15 @@ class LaravelCloudDbDumperCommand extends Command
 
     protected function produceDump(TargetNavigator $navigator, DumpManager $dumpManager, DatabaseTarget $target): string
     {
-        if ($dumpManager->cachedCopyExists($target)) {
-            $reuse = select(
-                label: 'A dump from today already exists. Use the cached copy?',
-                options: [
-                    'cached' => 'Use cached copy (saves bandwidth)',
-                    'fresh' => 'Download a fresh dump',
-                ],
-                default: 'cached',
-            );
+        $existing = $this->option('download') ? [] : $dumpManager->existingDumps($target);
 
-            if ($reuse === 'cached') {
-                $path = $dumpManager->pathFor($target);
-                info("Using cached dump: {$path}");
+        if ($existing !== []) {
+            $chosen = $this->chooseExistingDump($existing, $target);
 
-                return $path;
+            if ($chosen !== null) {
+                info("Using local dump: {$chosen}");
+
+                return $chosen;
             }
         }
 
@@ -171,6 +167,60 @@ class LaravelCloudDbDumperCommand extends Command
             : 'Dump written to a temporary file (not stored locally).');
 
         return $path;
+    }
+
+    /**
+     * Offer the dumps already on disk for this database, newest first, so a
+     * known-good snapshot can be restored again without pulling anything.
+     * Returns null when the user wants a fresh download.
+     *
+     * @param  array<int, array{path: string, date: string, size: int}>  $existing
+     */
+    protected function chooseExistingDump(array $existing, DatabaseTarget $target): ?string
+    {
+        $today = Carbon::now()->format('Y-m-d');
+
+        $options = ['__fresh__' => 'Download a fresh dump'];
+
+        foreach ($existing as $dump) {
+            $label = $dump['date'].'  ('.$this->humanSize($dump['size']).')';
+
+            if ($dump['date'] === $today) {
+                $label .= '  — today';
+            }
+
+            $options[$dump['path']] = $label;
+        }
+
+        $newest = $existing[0];
+
+        $chosen = select(
+            label: count($existing) === 1
+                ? "One local dump of {$target->schemaName} already exists. Use it?"
+                : count($existing)." local dumps of {$target->schemaName} already exist. Use one?",
+            options: $options,
+            // Today's dump is the one a repeat run almost always wants; older
+            // snapshots are a deliberate choice, so they are never the default.
+            default: $newest['date'] === $today ? $newest['path'] : '__fresh__',
+            scroll: 10,
+        );
+
+        return $chosen === '__fresh__' ? null : (string) $chosen;
+    }
+
+    protected function humanSize(int $bytes): string
+    {
+        foreach (['B', 'KB', 'MB', 'GB'] as $unit) {
+            if ($bytes < 1024 || $unit === 'GB') {
+                return $unit === 'B'
+                    ? $bytes.' B'
+                    : number_format($bytes, $bytes < 10 ? 1 : 0).' '.$unit;
+            }
+
+            $bytes /= 1024;
+        }
+
+        return $bytes.' B';
     }
 
     protected function restoreLocally(string $dumpFile): void

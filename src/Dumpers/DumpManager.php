@@ -91,6 +91,83 @@ class DumpManager
     }
 
     /**
+     * Every stored dump of this target, newest first.
+     *
+     * A dump filename carries the database, the driver and the day it was
+     * taken, so the folder itself is the history — no index to keep in sync.
+     *
+     * @return array<int, array{path: string, date: string, size: int}>
+     */
+    public function existingDumps(DatabaseTarget $target): array
+    {
+        if (! $this->storeDumps || ! File::isDirectory($this->directory())) {
+            return [];
+        }
+
+        $dumps = [];
+
+        foreach (File::files($this->directory()) as $file) {
+            $parsed = self::parseFilename($file->getFilename());
+
+            if ($parsed === null) {
+                continue;
+            }
+
+            if ($parsed['database'] !== $target->schemaName || $parsed['driver'] !== $target->driver()) {
+                continue;
+            }
+
+            $dumps[] = [
+                'path' => $file->getPathname(),
+                'date' => $parsed['date'],
+                'size' => $file->getSize(),
+            ];
+        }
+
+        usort($dumps, fn (array $a, array $b) => strcmp($b['date'], $a['date']));
+
+        return $dumps;
+    }
+
+    /**
+     * Pull the database, driver and date back out of a dump filename (pure).
+     *
+     * Read from the right, because a database name may itself contain the
+     * underscores this joins on.
+     *
+     * @return array{database: string, driver: string, date: string}|null
+     */
+    public static function parseFilename(string $filename): ?array
+    {
+        if (! str_ends_with($filename, '.sql')) {
+            return null;
+        }
+
+        $segments = explode('_', substr($filename, 0, -4));
+
+        if (count($segments) < 3) {
+            return null;
+        }
+
+        $date = array_pop($segments);
+        $driver = array_pop($segments);
+
+        if (! in_array($driver, ['mysql', 'pgsql'], true)) {
+            return null;
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+            return null;
+        }
+
+        return [
+            'database' => implode('_', $segments),
+            'driver' => $driver,
+            'date' => $date,
+        ];
+    }
+
+    /**
      * Whether a cached dump already exists for this target today.
      */
     public function cachedCopyExists(DatabaseTarget $target): bool
