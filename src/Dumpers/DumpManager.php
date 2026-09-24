@@ -66,10 +66,10 @@ class DumpManager
     public function directory(): string
     {
         if ($this->storeDumps) {
-            return $this->backupPath;
+            return self::normalisePath($this->backupPath);
         }
 
-        return $this->temporaryDirectory ??= rtrim(sys_get_temp_dir(), '/')
+        return $this->temporaryDirectory ??= self::normalisePath(rtrim(sys_get_temp_dir(), '/\\'))
             .'/laravel-cloud-db-dumper-'.bin2hex(random_bytes(8));
     }
 

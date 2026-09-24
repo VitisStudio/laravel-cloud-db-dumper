@@ -5,7 +5,9 @@ use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 use VitisStudio\LaravelCloudDbDumper\Dumpers\DumpManager;
 
 beforeEach(function () {
-    $this->backupDir = sys_get_temp_dir().'/dumps-'.uniqid();
+    // Normalised, because DumpManager reports every path with one separator
+    // and sys_get_temp_dir() is backslashed on Windows.
+    $this->backupDir = DumpManager::normalisePath(sys_get_temp_dir()).'/dumps-'.uniqid();
     Carbon::setTestNow(Carbon::parse('2026-06-25 10:00:00'));
 });
 
@@ -58,7 +60,7 @@ it('writes outside the project and caches nothing when storage is off', function
     $path = $manager->pathFor($target);
 
     expect($manager->storesDumps())->toBeFalse()
-        ->and($path)->toStartWith(rtrim(sys_get_temp_dir(), '/').'/laravel-cloud-db-dumper-')
+        ->and($path)->toStartWith(DumpManager::normalisePath(rtrim(sys_get_temp_dir(), '/\\')).'/laravel-cloud-db-dumper-')
         ->and($path)->not->toContain('/should/not/be/used')
         ->and($manager->directory())->toBe($manager->directory());
 });
@@ -190,4 +192,16 @@ it('deletes dumps but refuses paths it did not write', function () {
         ->and(File::exists($dump))->toBeFalse()
         ->and(File::exists($bystander))->toBeTrue()
         ->and(File::exists($alsoSafe))->toBeTrue();
+});
+
+it('reports paths with one separator whatever the platform uses', function () {
+    expect(DumpManager::normalisePath('C:\Users\RUNNER~1\AppData\Local\Temp'))
+        ->toBe('C:/Users/RUNNER~1/AppData/Local/Temp')
+        ->and(DumpManager::normalisePath('/var/folders/tmp'))->toBe('/var/folders/tmp');
+
+    // A backslashed backup path is reported the same way pathFor() builds it.
+    $manager = new DumpManager('C:\app\database\backups');
+
+    expect($manager->directory())->toBe('C:/app/database/backups')
+        ->and($manager->pathFor(pgTarget()))->toBe('C:/app/database/backups/forge_pgsql_2026-06-25.sql');
 });
