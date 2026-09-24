@@ -75,4 +75,4 @@ it('resolves the organization the user actually picked', function () {
 
     expect($resolved['organization'])->toBe('Ram Jack Systems Distribution')
         ->and($resolved['token'])->toBe('3|ccc');
-});
+})->skip(PHP_OS_FAMILY === 'Windows', 'Laravel Prompts cannot render interactively on Windows, so its fake keyboard has nothing to drive.');

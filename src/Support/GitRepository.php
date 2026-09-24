@@ -48,7 +48,10 @@ class GitRepository
 
         $root = trim($result->output());
 
-        return $root !== '' ? $root : null;
+        // git answers with forward slashes even on Windows, where everything
+        // else hands back backslashes. Settle on one so callers can compare
+        // and concatenate without caring which produced the string.
+        return $root !== '' ? str_replace('\\', '/', $root) : null;
     }
 
     /**
