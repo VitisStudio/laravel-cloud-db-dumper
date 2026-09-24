@@ -1,0 +1,30 @@
+{
+  "id": "blue-brook-70289993",
+  "name": "main-cluster",
+  "type": "neon_serverless_postgres",
+  "status": "available",
+  "region": "blue-brook-70289993",
+  "config": {
+    "cu_min": 0.25,
+    "cu_max": 1,
+    "suspend_seconds": 300,
+    "retention_days": 7
+  },
+  "connection": {
+    "hostname": "[redacted]",
+    "port": 5432,
+    "protocol": "postgres",
+    "driver": "pgsql",
+    "username": "[redacted]",
+    "password": "[redacted]"
+  },
+  "createdAt": "2026-08-05T13:49:32.000000Z",
+  "updatedAt": null,
+  "schemas": [
+    {
+      "id": "66023719",
+      "name": "main-cluster",
+      "createdAt": "2026-08-05T13:49:32.000000Z"
+    }
+  ]
+}

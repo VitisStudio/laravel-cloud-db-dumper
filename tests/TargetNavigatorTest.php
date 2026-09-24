@@ -28,25 +28,17 @@ function clustersFixture(): array
     ];
 }
 
-it('resolves the cluster that owns a schema id', function () {
-    $navigator = new TargetNavigator(new CloudCli('cloud'));
-
-    $cluster = $navigator->resolveCluster(clustersFixture(), 'schema-9');
-
-    expect($cluster['id'])->toBe('cluster-b');
+it('finds the cluster that owns a schema id', function () {
+    expect(TargetNavigator::findCluster(clustersFixture(), 'schema-9')['id'])->toBe('cluster-b');
 });
 
-it('throws when no cluster owns the schema id', function () {
-    $navigator = new TargetNavigator(new CloudCli('cloud'));
+it('finds no cluster when nothing owns the schema id', function () {
+    expect(TargetNavigator::findCluster(clustersFixture(), 'missing-schema'))->toBeNull();
+});
 
-    $navigator->resolveCluster(clustersFixture(), 'missing-schema');
-})->throws(RuntimeException::class);
-
-it('throws when the schema id is empty', function () {
-    $navigator = new TargetNavigator(new CloudCli('cloud'));
-
-    $navigator->resolveCluster(clustersFixture(), '');
-})->throws(RuntimeException::class);
+it('finds no cluster when the schema id is empty', function () {
+    expect(TargetNavigator::findCluster(clustersFixture(), ''))->toBeNull();
+});
 
 it('retries with the saved organization token when the cli cannot choose one', function () {
     $cluster = [
@@ -99,6 +91,14 @@ it('retries with the saved organization token when the cli cannot choose one', f
     Process::assertRan(fn ($process) => ($process->environment['LARAVEL_CLOUD_TOKEN'] ?? null) === '2|bbb');
 });
 
+function environmentsFixture(): array
+{
+    return [
+        ['id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => 'schema-9'],
+        ['id' => 'env-stg', 'name' => 'staging', 'databaseSchemaId' => 'schema-1'],
+    ];
+}
+
 function applicationsFixture(): array
 {
     return [
@@ -106,19 +106,21 @@ function applicationsFixture(): array
             'id' => 'app-1',
             'name' => 'acme-web',
             'repositoryFullName' => 'acme/web',
-            'defaultEnvironmentId' => 'env-prod',
+            // Both null in a real application:list payload — see
+            // tests/fixtures/cloud/application-list.json.
+            'defaultEnvironmentId' => null,
             'environments' => [
-                ['id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => 'schema-9'],
-                ['id' => 'env-stg', 'name' => 'staging', 'databaseSchemaId' => 'schema-1'],
+                ['id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => null],
+                ['id' => 'env-stg', 'name' => 'staging', 'databaseSchemaId' => null],
             ],
         ],
         [
             'id' => 'app-2',
             'name' => 'acme-api',
             'repositoryFullName' => 'acme/api',
-            'defaultEnvironmentId' => 'env-api',
+            'defaultEnvironmentId' => null,
             'environments' => [
-                ['id' => 'env-api', 'name' => 'production', 'databaseSchemaId' => 'schema-2'],
+                ['id' => 'env-api', 'name' => 'production', 'databaseSchemaId' => null],
             ],
         ],
     ];
@@ -142,6 +144,7 @@ it('filters applications by the repository they deploy from', function () {
 it('resolves application and environment from identifiers without prompting', function () {
     Process::fake([
         '*application:list*' => Process::result(json_encode(applicationsFixture())),
+        '*environment:list*' => Process::result(json_encode(environmentsFixture())),
         '*database-cluster:list*' => Process::result(json_encode([
             [
                 'id' => 'cluster-b',
@@ -163,9 +166,12 @@ it('resolves application and environment from identifiers without prompting', fu
         ->and($target->driver())->toBe('pgsql');
 });
 
-it('uses the environments embedded in the application listing', function () {
+it('asks for the environment listing rather than trusting the embedded rows', function () {
     Process::fake([
         '*application:list*' => Process::result(json_encode([applicationsFixture()[1]])),
+        '*environment:list*' => Process::result(json_encode([
+            ['id' => 'env-api', 'name' => 'production', 'databaseSchemaId' => 'schema-2'],
+        ])),
         '*database-cluster:list*' => Process::result(json_encode([
             [
                 'id' => 'cluster-a',
@@ -185,15 +191,64 @@ it('uses the environments embedded in the application listing', function () {
         ->and($target->schemaName)->toBe('acme_api')
         ->and($target->driver())->toBe('mysql');
 
-    Process::assertNotRan(fn ($process) => str_contains(
+    Process::assertRan(fn ($process) => str_contains(
         is_array($process->command) ? implode(' ', $process->command) : (string) $process->command,
         'environment:list',
     ));
 });
 
 it('fails on an identifier that matches no application', function () {
-    Process::fake(['*application:list*' => Process::result(json_encode(applicationsFixture()))]);
+    Process::fake([
+        '*application:list*' => Process::result(json_encode(applicationsFixture())),
+        '*environment:list*' => Process::result(json_encode(environmentsFixture())),
+    ]);
 
     expect(fn () => (new TargetNavigator(new CloudCli))->navigate('ghost-app'))
         ->toThrow(RuntimeException::class, 'Unable to resolve application "ghost-app"');
+});
+
+it('re-fetches the environment when the listing omitted its database', function () {
+    Process::fake([
+        '*application:list*' => Process::result(json_encode([[
+            'id' => 'app-1',
+            'name' => 'Field Ops',
+            'environments' => [['id' => 'env-prod', 'name' => 'production']],
+        ]])),
+        // Even the listing can omit it; the full fetch is the last resort.
+        '*environment:list*' => Process::result(json_encode([
+            ['id' => 'env-prod', 'name' => 'production'],
+        ])),
+        '*environment:get*' => Process::result(json_encode([
+            'id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => 'schema-9',
+        ])),
+        '*database-cluster:list*' => Process::result(json_encode([clustersFixture()[1]])),
+    ]);
+
+    $target = (new TargetNavigator(new CloudCli))->navigate();
+
+    expect($target->schemaName)->toBe('forge')
+        ->and($target->clusterId)->toBe('cluster-b');
+});
+
+it('lists a cluster\'s databases when the cluster listing carried none', function () {
+    Process::fake([
+        '*application:list*' => Process::result(json_encode([[
+            'id' => 'app-1',
+            'name' => 'Field Ops',
+            'environments' => [['id' => 'env-prod', 'name' => 'production']],
+        ]])),
+        '*environment:list*' => Process::result(json_encode([
+            ['id' => 'env-prod', 'name' => 'production', 'databaseSchemaId' => 'schema-9'],
+        ])),
+        // A cluster with no schemas embedded — the case that used to dead-end.
+        '*database-cluster:list*' => Process::result(json_encode([[
+            'id' => 'cluster-b', 'name' => 'cluster-b', 'type' => 'postgres', 'schemas' => [],
+        ]])),
+        '*database:list*' => Process::result(json_encode([['id' => 'schema-9', 'name' => 'forge']])),
+    ]);
+
+    $target = (new TargetNavigator(new CloudCli))->navigate();
+
+    expect($target->schemaName)->toBe('forge')
+        ->and($target->clusterId)->toBe('cluster-b');
 });

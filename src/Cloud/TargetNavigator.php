@@ -77,16 +77,21 @@ class TargetNavigator
             throw new RuntimeException("No environments found for application \"{$application['name']}\".");
         }
 
-        $environment = $this->resolveEnvironment(
-            $environments,
-            $environment,
-            (string) ($application['defaultEnvironmentId'] ?? ''),
-        );
+        $environment = $this->resolveEnvironment($environments, $environment, $this->defaultEnvironmentId($environments));
+
+        $schemaId = $this->schemaIdFor($environment);
 
         $clusters = $this->call(fn (CloudCli $cloud) => $cloud->clusters(), 'Fetching database clusters...');
-        $cluster = $this->resolveCluster($clusters, (string) ($environment['databaseSchemaId'] ?? ''));
 
-        $schema = $this->chooseSchema($cluster, (string) ($environment['databaseSchemaId'] ?? ''));
+        if ($clusters === []) {
+            throw new RuntimeException('No database clusters found for this organization.');
+        }
+
+        // Match the environment to its cluster where we can, and simply ask
+        // when we cannot, rather than dead-ending on a lookup failure.
+        $cluster = self::findCluster($clusters, $schemaId) ?? $this->chooseCluster($clusters);
+
+        $schema = $this->chooseSchema($cluster, $schemaId);
 
         return new DatabaseTarget(
             applicationId: (string) $application['id'],
@@ -126,22 +131,51 @@ class TargetNavigator
     }
 
     /**
-     * Find the cluster that owns the given schema id (pure).
+     * Find the cluster that owns the given schema id, or null (pure).
      *
      * @param  array<int, array<string, mixed>>  $clusters
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    public function resolveCluster(array $clusters, string $schemaId): array
+    public static function findCluster(array $clusters, string $schemaId): ?array
     {
+        if ($schemaId === '') {
+            return null;
+        }
+
         foreach ($clusters as $cluster) {
             foreach ($cluster['schemas'] ?? [] as $schema) {
-                if ((string) ($schema['id'] ?? '') === $schemaId && $schemaId !== '') {
+                if ((string) ($schema['id'] ?? '') === $schemaId) {
                     return $cluster;
                 }
             }
         }
 
-        throw new RuntimeException('Could not find a database cluster for the selected environment.');
+        return null;
+    }
+
+    /**
+     * The schema id an environment is wired to.
+     *
+     * A listing gives partial environments, so when the id is absent the
+     * environment is re-fetched in full — the same thing the cloud CLI's own
+     * resolver does before it needs the relationship data.
+     *
+     * @param  array<string, mixed>  $environment
+     */
+    protected function schemaIdFor(array $environment): string
+    {
+        $schemaId = (string) ($environment['databaseSchemaId'] ?? '');
+
+        if ($schemaId !== '') {
+            return $schemaId;
+        }
+
+        $full = $this->call(
+            fn (CloudCli $cloud) => $cloud->environment((string) $environment['id']),
+            'Fetching environment...',
+        );
+
+        return (string) ($full['databaseSchemaId'] ?? '');
     }
 
     /**
@@ -255,20 +289,46 @@ class TargetNavigator
     }
 
     /**
-     * Environments for an application, preferring the ones `application:list`
-     * already embedded over a second round trip.
+     * Which environment to preselect.
+     *
+     * `application:list` reports defaultEnvironmentId as null — it does not ask
+     * the API to include that relationship — so it cannot be used. Prefer the
+     * project's pinned environment, then one plainly named for production.
+     *
+     * @param  array<int, array<string, mixed>>  $environments
+     */
+    protected function defaultEnvironmentId(array $environments): string
+    {
+        $pinned = $this->localConfig?->environmentId();
+
+        if ($pinned !== null && self::findByIdentifier($environments, $pinned) !== null) {
+            return $pinned;
+        }
+
+        foreach ($environments as $environment) {
+            if (strcasecmp((string) ($environment['name'] ?? ''), 'production') === 0) {
+                return (string) $environment['id'];
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Environments for an application.
+     *
+     * The ones `application:list` embeds look complete but are not: the API
+     * returns a relationship only when a request asks to include it, and that
+     * command asks for neither `database` nor `defaultEnvironment`. So the
+     * embedded rows carry a null databaseSchemaId, which is the one field the
+     * whole cluster lookup turns on. Asking for the listing directly costs one
+     * call and saves the environment:get that guessing otherwise forces.
      *
      * @param  array<string, mixed>  $application
      * @return array<int, array<string, mixed>>
      */
     protected function environmentsFor(array $application): array
     {
-        $environments = $application['environments'] ?? [];
-
-        if (is_array($environments) && $environments !== []) {
-            return array_values($environments);
-        }
-
         return $this->call(
             fn (CloudCli $cloud) => $cloud->environments((string) $application['id']),
             'Fetching environments...',
@@ -307,6 +367,22 @@ class TargetNavigator
     }
 
     /**
+     * Pick a cluster when the environment could not be matched to one, taking
+     * a sole candidate without asking.
+     *
+     * @param  array<int, array<string, mixed>>  $clusters
+     * @return array<string, mixed>
+     */
+    protected function chooseCluster(array $clusters): array
+    {
+        if (count($clusters) === 1) {
+            return $this->resolved('Database cluster', $clusters[0]);
+        }
+
+        return $this->choose('Database cluster', $clusters);
+    }
+
+    /**
      * Select a schema within a cluster, defaulting to the one the environment
      * is wired to.
      *
@@ -316,6 +392,15 @@ class TargetNavigator
     protected function chooseSchema(array $cluster, string $environmentSchemaId): array
     {
         $schemas = $cluster['schemas'] ?? [];
+
+        // A cluster listing does not always carry its databases, so ask for
+        // them directly rather than concluding the cluster is empty.
+        if (! is_array($schemas) || $schemas === []) {
+            $schemas = $this->call(
+                fn (CloudCli $cloud) => $cloud->databases((string) $cluster['id']),
+                'Fetching databases...',
+            );
+        }
 
         if ($schemas === []) {
             throw new RuntimeException("Cluster \"{$cluster['name']}\" has no databases.");
@@ -365,7 +450,7 @@ class TargetNavigator
      */
     protected function resolved(string $label, array $item): array
     {
-        note("{$label}: ".(string) ($item['name'] ?? $item['id'] ?? '?'));
+        note("{$label}: ".(string) $item['name']);
 
         return $item;
     }

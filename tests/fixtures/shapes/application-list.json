@@ -1,0 +1,180 @@
+[
+  {
+    "id": "app-11111111-2222-3333-4444-555555555555",
+    "name": "field-ops",
+    "slug": "main",
+    "region": "blue-brook-70289993",
+    "environmentIds": [
+      "env-66666666-7777-8888-9999-aaaaaaaaaaaa"
+    ],
+    "deploymentIds": [],
+    "repositoryFullName": "example",
+    "repositoryBranch": "main",
+    "slackChannel": null,
+    "avatarUrl": null,
+    "rootDirectory": "projects/admin",
+    "createdAt": "2026-08-05T13:48:44.000000Z",
+    "repositoryId": null,
+    "organizationId": "org-a2647635-fce4-4740-806f-2f56e086b55f",
+    "defaultEnvironmentId": null,
+    "organization": {
+      "id": "org-a2647635-fce4-4740-806f-2f56e086b55f",
+      "name": "field-ops",
+      "slug": "main"
+    },
+    "environments": [
+      {
+        "id": "env-66666666-7777-8888-9999-aaaaaaaaaaaa",
+        "url": "https://example.laravel.cloud",
+        "name": "field-ops",
+        "branch": null,
+        "status": "running",
+        "instances": null,
+        "buildCommand": "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader\n\nnpm ci --audit false\nnpm run build\n\ncomposer build",
+        "deployCommand": "composer deploy",
+        "slug": "main",
+        "statusEnum": "running",
+        "createdFromAutomation": false,
+        "vanityDomain": "https://example.laravel.cloud",
+        "phpMajorVersion": "8.5",
+        "nodeVersion": "24",
+        "usesOctane": false,
+        "usesHibernation": true,
+        "usesPushToDeploy": true,
+        "usesDeployHook": false,
+        "environmentVariables": [
+          {
+            "key": "APP_KEY",
+            "value": "*****"
+          },
+          {
+            "key": "APP_ENV",
+            "value": "*****"
+          },
+          {
+            "key": "APP_DEBUG",
+            "value": "*****"
+          },
+          {
+            "key": "APP_URL",
+            "value": "*****"
+          },
+          {
+            "key": "LOG_CHANNEL",
+            "value": "*****"
+          },
+          {
+            "key": "MAIL_MAILER",
+            "value": "*****"
+          },
+          {
+            "key": "MAIL_HOST",
+            "value": "*****"
+          },
+          {
+            "key": "MAIL_PORT",
+            "value": "*****"
+          },
+          {
+            "key": "QUEUE_CONNECTION",
+            "value": "*****"
+          },
+          {
+            "key": "SESSION_DRIVER",
+            "value": "*****"
+          },
+          {
+            "key": "CACHE_STORE",
+            "value": "*****"
+          },
+          {
+            "key": "FILESYSTEM_DISK",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_API_KEY",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_CLIENT_ID",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_CLIENT_SECRET",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_COMPANY_ID",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_SENDER_ID",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_USERNAME",
+            "value": "*****"
+          },
+          {
+            "key": "BILLING_PASSWORD",
+            "value": "*****"
+          },
+          {
+            "key": "SEARCH_HOST",
+            "value": "*****"
+          },
+          {
+            "key": "SEARCH_KEY",
+            "value": "*****"
+          },
+          {
+            "key": "FEATURE_FLAG_TOKEN",
+            "value": "*****"
+          }
+        ],
+        "networkSettings": {
+          "cache": {
+            "strategy": "default"
+          },
+          "response_headers": {
+            "frame": "deny",
+            "content_type": "nosniff",
+            "robots_tag": "index, follow",
+            "hsts": {
+              "max_age": null,
+              "include_subdomains": false,
+              "preload": false
+            }
+          },
+          "firewall": {
+            "bot_categories": [],
+            "rate_limit": {
+              "level": null,
+              "per_minute": null,
+              "4xx": false,
+              "429": false
+            },
+            "under_attack_mode_started_at": null,
+            "block_path": true,
+            "browser_integrity_check": true,
+            "social_preview_crawlers": true
+          },
+          "content_converter": false
+        },
+        "createdAt": "2026-08-05T13:48:46.000000Z",
+        "updatedAt": null,
+        "application": null,
+        "branchId": null,
+        "deploymentIds": [],
+        "currentDeploymentId": null,
+        "domainIds": [],
+        "primaryDomainId": null,
+        "databaseSchemaId": null,
+        "cacheId": null,
+        "websocketApplicationId": null,
+        "secrets": []
+      }
+    ],
+    "deployments": []
+  }
+]

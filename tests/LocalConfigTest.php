@@ -39,6 +39,7 @@ it('returns nulls when there is no .cloud/config.json', function () {
 it('defaults the target to the project config without prompting', function () {
     Process::fake([
         '*application:list*' => Process::result(json_encode(applicationsFixture())),
+        '*environment:list*' => Process::result(json_encode(environmentsFixture())),
         '*database-cluster:list*' => Process::result(json_encode([
             [
                 'id' => 'cluster-b',
@@ -70,6 +71,7 @@ it('defaults the target to the project config without prompting', function () {
 it('prefers an explicit argument over the project config', function () {
     Process::fake([
         '*application:list*' => Process::result(json_encode(applicationsFixture())),
+        '*environment:list*' => Process::result(json_encode(environmentsFixture())),
         '*database-cluster:list*' => Process::result(json_encode([
             [
                 'id' => 'cluster-b',

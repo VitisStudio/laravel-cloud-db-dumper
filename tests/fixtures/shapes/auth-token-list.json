@@ -1,0 +1,27 @@
+[
+  {
+    "organization": "Example Org",
+    "token": "[redacted]",
+    "source": "/home/user/.config/cloud/config.json"
+  },
+  {
+    "organization": "Second Org",
+    "token": "[redacted]",
+    "source": "/home/user/.config/cloud/config.json"
+  },
+  {
+    "organization": "Third Org",
+    "token": "[redacted]",
+    "source": "/home/user/.config/cloud/config.json"
+  },
+  {
+    "organization": "Fourth Org",
+    "token": "[redacted]",
+    "source": "/home/user/.config/cloud/config.json"
+  },
+  {
+    "organization": "Fifth Org",
+    "token": "[redacted]",
+    "source": "/home/user/.config/cloud/config.json"
+  }
+]

@@ -5,9 +5,11 @@ namespace VitisStudio\LaravelCloudDbDumper\Dumpers;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use InvalidArgumentException;
+use RuntimeException;
 use Spatie\DbDumper\Databases\MySql;
 use Spatie\DbDumper\Databases\PostgreSql;
 use Spatie\DbDumper\DbDumper;
+use Spatie\DbDumper\Exceptions\DumpFailed;
 use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 
 /**
@@ -131,6 +133,12 @@ class DumpManager
                 continue;
             }
 
+            // A dump that failed leaves an empty file behind. Offering it as a
+            // restorable copy would wipe the local database with nothing.
+            if ($file->getSize() === 0) {
+                continue;
+            }
+
             $dumps[] = [
                 'path' => self::normalisePath($file->getPathname()),
                 'database' => $parsed['database'],
@@ -240,9 +248,35 @@ class DumpManager
 
         $path = $this->pathFor($target);
 
-        $this->dumperFor($target)->dumpToFile($path);
+        try {
+            $this->dumperFor($target)->dumpToFile($path);
+        } catch (DumpFailed $e) {
+            throw new RuntimeException(self::explainDumpFailure($e->getMessage(), $target->driver()), 0, $e);
+        }
 
         return $path;
+    }
+
+    /**
+     * Add the missing half of a dump failure the caller can act on (pure).
+     *
+     * pg_dump and mysqldump refuse to read a server newer than themselves, and
+     * say so in terms of protocol versions without mentioning that the fix is a
+     * different binary.
+     */
+    public static function explainDumpFailure(string $message, string $driver): string
+    {
+        if (stripos($message, 'server version') === false) {
+            return $message;
+        }
+
+        $binary = $driver === 'mysql' ? 'mysqldump' : 'pg_dump';
+        $setting = $driver === 'mysql' ? 'MYSQLDUMP_PATH' : 'PG_DUMP_PATH';
+
+        return $message."\n\n"
+            ."The {$binary} on your PATH is older than the server. Point {$setting} at a newer one — "
+            .'Postgres.app and DBngin keep every installed version under their own directory — or install '
+            .'a matching client.';
     }
 
     protected function dumperFor(DatabaseTarget $target): DbDumper
