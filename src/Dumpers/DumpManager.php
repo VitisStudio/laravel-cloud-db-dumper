@@ -133,6 +133,12 @@ class DumpManager
                 continue;
             }
 
+            // A dump that failed leaves an empty file behind. Offering it as a
+            // restorable copy would wipe the local database with nothing.
+            if ($file->getSize() === 0) {
+                continue;
+            }
+
             $dumps[] = [
                 'path' => self::normalisePath($file->getPathname()),
                 'database' => $parsed['database'],

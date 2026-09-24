@@ -102,6 +102,25 @@ class DatabaseClients
     }
 
     /**
+     * Combine chosen binary paths with the ones set in config (pure).
+     *
+     * Config declares every binary key whether or not it is set, so its null
+     * entries have to be dropped rather than merged — a plain union against it
+     * keeps those nulls and silently discards the paths chosen at runtime.
+     *
+     * @param  array<string, mixed>  $configured
+     * @param  array<string, string>  $chosen
+     * @return array<string, string>
+     */
+    public static function merge(array $configured, array $chosen): array
+    {
+        $usable = array_filter($configured, fn ($path) => is_string($path) && $path !== '');
+
+        /** @var array<string, string> */
+        return $chosen + $usable;
+    }
+
+    /**
      * Pull a version out of a client's --version banner (pure).
      *
      * pg_dump prints "pg_dump (PostgreSQL) 18.1", mysqldump prints

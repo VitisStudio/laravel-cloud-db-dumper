@@ -352,8 +352,10 @@ class LaravelCloudDbDumperCommand extends Command
 
         // An explicit path in config is the author's decision; do not override
         // it, and do not nag about it.
-        if (($configured[$dumpBinary] ?? null) && ($configured[$restoreBinary] ?? null)) {
-            return $this->binaries = $configured;
+        $explicit = DatabaseClients::merge($configured, []);
+
+        if (isset($explicit[$dumpBinary], $explicit[$restoreBinary])) {
+            return $this->binaries = $explicit;
         }
 
         $serverVersion = (new LocalDatabase((string) config('database.default')))->serverVersion();
@@ -363,10 +365,10 @@ class LaravelCloudDbDumperCommand extends Command
             $reason = $this->staleClientReason($saved, $serverVersion);
 
             if ($reason === null) {
-                return $this->binaries = $configured + [
+                return $this->binaries = DatabaseClients::merge($configured, [
                     $dumpBinary => $saved['dump'],
                     $restoreBinary => $saved['restore'],
-                ];
+                ]);
             }
 
             warning($reason);
@@ -379,7 +381,7 @@ class LaravelCloudDbDumperCommand extends Command
         if ($dumps === []) {
             note("No {$dumpBinary} found on this machine; falling back to whatever the PATH resolves.");
 
-            return $this->binaries = $configured;
+            return $this->binaries = $explicit;
         }
 
         $chosen = [
@@ -393,10 +395,10 @@ class LaravelCloudDbDumperCommand extends Command
 
         $preferences->saveClients($driver, $chosen);
 
-        return $this->binaries = $configured + [
+        return $this->binaries = DatabaseClients::merge($configured, [
             $dumpBinary => $chosen['dump'],
             $restoreBinary => $chosen['restore'],
-        ];
+        ]);
     }
 
     /**

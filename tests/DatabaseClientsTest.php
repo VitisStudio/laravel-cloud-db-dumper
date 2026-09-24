@@ -55,3 +55,29 @@ it('reads a version out of a server banner', function (string $raw, ?string $exp
     ['10.11.6-MariaDB-log', '10.11.6'],
     ['unknown', null],
 ]);
+
+it('does not let config nulls discard the binaries that were chosen', function () {
+    // config/cloud-db-dumper.php declares every key via env(), so they all
+    // exist as null when unset. A plain union keeps those nulls, which is how
+    // a chosen pg_dump 18.1 silently ran as 16.2 off the PATH.
+    $configured = ['pg_dump' => null, 'pg_restore' => null, 'psql' => null, 'mysqldump' => null];
+    $chosen = ['pg_dump' => '/opt/pg/18.1/bin/pg_dump', 'psql' => '/opt/pg/18.1/bin/psql'];
+
+    $merged = DatabaseClients::merge($configured, $chosen);
+
+    expect($merged['pg_dump'])->toBe('/opt/pg/18.1/bin/pg_dump')
+        ->and($merged['psql'])->toBe('/opt/pg/18.1/bin/psql')
+        ->and($merged)->not->toHaveKey('pg_restore');
+});
+
+it('lets an explicitly configured path win over a chosen one', function () {
+    $merged = DatabaseClients::merge(
+        ['pg_dump' => '/mine/pg_dump', 'psql' => null],
+        ['pg_dump' => '/discovered/pg_dump'],
+    );
+
+    // The chosen key is what the caller asked for, so it stays; the point is
+    // that a real configured value survives instead of being dropped.
+    expect(DatabaseClients::merge(['pg_dump' => '/mine/pg_dump'], []))->toBe(['pg_dump' => '/mine/pg_dump'])
+        ->and($merged['pg_dump'])->toBe('/discovered/pg_dump');
+});
