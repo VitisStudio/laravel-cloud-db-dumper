@@ -1,0 +1,49 @@
+# Groups merged pull requests in auto-generated release notes, as produced by
+# `gh release create --generate-notes` or the "Generate release notes" button.
+#
+# Only the copy on the default branch is read, and a pull request lands in the
+# first category whose labels it matches, so order matters here.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking-change
+        - breaking
+
+    - title: Security
+      labels:
+        - security
+
+    - title: New features
+      labels:
+        - enhancement
+        - feature
+
+    - title: Bug fixes
+      labels:
+        - bug
+        - bugfix
+
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+
+    - title: Maintenance
+      labels:
+        - chore
+        - refactor
+        - test
+        - ci
+
+    - title: Dependencies
+      labels:
+        - dependencies
+
+    # Anything unlabelled still shows up rather than vanishing from the notes.
+    - title: Other changes
+      labels:
+        - "*"
