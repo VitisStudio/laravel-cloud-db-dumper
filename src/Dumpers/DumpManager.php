@@ -100,6 +100,19 @@ class DumpManager
      */
     public function existingDumps(DatabaseTarget $target): array
     {
+        return $this->storedDumps($target);
+    }
+
+    /**
+     * Every stored dump, newest first, optionally narrowed to one target.
+     *
+     * Only files this package wrote are ever reported: anything else sharing
+     * the directory is invisible here, and so cannot be deleted by prune.
+     *
+     * @return array<int, array{path: string, database: string, driver: string, date: string, size: int}>
+     */
+    public function storedDumps(?DatabaseTarget $target = null): array
+    {
         if (! $this->storeDumps || ! File::isDirectory($this->directory())) {
             return [];
         }
@@ -113,12 +126,15 @@ class DumpManager
                 continue;
             }
 
-            if ($parsed['database'] !== $target->schemaName || $parsed['driver'] !== $target->driver()) {
+            if ($target !== null
+                && ($parsed['database'] !== $target->schemaName || $parsed['driver'] !== $target->driver())) {
                 continue;
             }
 
             $dumps[] = [
                 'path' => $file->getPathname(),
+                'database' => $parsed['database'],
+                'driver' => $parsed['driver'],
                 'date' => $parsed['date'],
                 'size' => $file->getSize(),
             ];
@@ -127,6 +143,31 @@ class DumpManager
         usort($dumps, fn (array $a, array $b) => strcmp($b['date'], $a['date']));
 
         return $dumps;
+    }
+
+    /**
+     * Delete stored dumps, returning how many went.
+     *
+     * Each path is re-checked against the dump naming scheme before it is
+     * unlinked, so a caller cannot talk this into deleting something else.
+     *
+     * @param  array<int, string>  $paths
+     */
+    public function delete(array $paths): int
+    {
+        $deleted = 0;
+
+        foreach ($paths as $path) {
+            if (self::parseFilename(basename($path)) === null) {
+                continue;
+            }
+
+            if (File::delete($path)) {
+                $deleted++;
+            }
+        }
+
+        return $deleted;
     }
 
     /**

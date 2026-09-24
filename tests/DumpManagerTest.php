@@ -158,3 +158,34 @@ it('lists nothing when dumps are not being stored', function () {
 
     expect($manager->existingDumps(makeTarget()))->toBe([]);
 });
+
+it('lists dumps of every database when no target is given', function () {
+    $manager = new DumpManager($this->backupDir);
+
+    File::ensureDirectoryExists($this->backupDir);
+    File::put($this->backupDir.'/forge_pgsql_2026-06-25.sql', 'x');
+    File::put($this->backupDir.'/other_mysql_2026-06-20.sql', 'x');
+    File::put($this->backupDir.'/notes.md', 'x');
+
+    $dumps = $manager->storedDumps();
+
+    expect($dumps)->toHaveCount(2)
+        ->and(array_column($dumps, 'database'))->toBe(['forge', 'other'])
+        ->and(array_column($dumps, 'driver'))->toBe(['pgsql', 'mysql']);
+});
+
+it('deletes dumps but refuses paths it did not write', function () {
+    $manager = new DumpManager($this->backupDir);
+
+    File::ensureDirectoryExists($this->backupDir);
+    File::put($dump = $this->backupDir.'/forge_pgsql_2026-06-25.sql', 'x');
+    File::put($bystander = $this->backupDir.'/important.sql', 'keep me');
+    File::put($alsoSafe = $this->backupDir.'/.env', 'keep me too');
+
+    $deleted = $manager->delete([$dump, $bystander, $alsoSafe]);
+
+    expect($deleted)->toBe(1)
+        ->and(File::exists($dump))->toBeFalse()
+        ->and(File::exists($bystander))->toBeTrue()
+        ->and(File::exists($alsoSafe))->toBeTrue();
+});

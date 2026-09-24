@@ -99,6 +99,8 @@ php artisan db:pull app-9f3c env-2a71
 | `environment`       | Environment ID or name; skips the environment prompt              |
 | `--organization=`   | Run against a named Cloud organization (see below)                |
 | `--download`        | Always fetch a fresh dump, ignoring the ones already on disk      |
+| `--prune`           | Delete the locally stored dumps and exit (see below)              |
+| `--force`           | Skip the prune confirmation, for scripts                          |
 | `--no-store`        | Never leave the dump on disk (see below)                          |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
@@ -212,7 +214,45 @@ Use `--download` to skip the question and always pull afresh:
 php artisan db:pull --download
 ```
 
-Dumps are never deleted for you. Prune `database/backups` when you want the disk space back.
+Dumps are never deleted behind your back. Clear them out with `--prune` when you want the space back.
+
+### Deleting stored dumps
+
+```bash
+php artisan db:pull --prune
+```
+
+```
+ ┌─────────────────┬────────┬────────────┬────────┐
+ │ Database        │ Driver │ Taken      │ Size   │
+ ├─────────────────┼────────┼────────────┼────────┤
+ │ acme_production │ pgsql  │ 2026-09-24 │ 2.0 KB │
+ │ acme_production │ pgsql  │ 2026-09-20 │ 4.0 KB │
+ │ acme_staging    │ mysql  │ 2026-06-25 │ 1.0 KB │
+ └─────────────────┴────────┴────────────┴────────┘
+
+ Deleting 3 dumps (7.0 KB) from /app/database/backups. This cannot be undone.
+
+ ┌ Delete these dumps? ────────────────────────────┐
+ │ Yes / No                                        │
+ └─────────────────────────────────────────────────┘
+```
+
+Every file is listed with its size and the day it was taken before anything happens, and the
+confirmation defaults to **no**. Pruning never contacts Laravel Cloud — it is a local file operation,
+so there is no application picker to walk first.
+
+**Only dumps this package wrote are ever deleted.** Files are matched against the
+`{database}_{driver}_{date}.sql` naming scheme, so anything else living in that folder is invisible to
+prune and cannot be removed by it, even by accident.
+
+For scripts, `--force` skips the confirmation:
+
+```bash
+php artisan db:pull --prune --force
+```
+
+Without `--force`, a non-interactive run declines and deletes nothing.
 
 ### Keeping nothing on disk
 

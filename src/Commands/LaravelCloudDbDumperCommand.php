@@ -21,6 +21,7 @@ use function Laravel\Prompts\info;
 use function Laravel\Prompts\note;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\spin;
+use function Laravel\Prompts\table;
 use function Laravel\Prompts\text;
 use function Laravel\Prompts\warning;
 
@@ -31,6 +32,8 @@ class LaravelCloudDbDumperCommand extends Command
         {environment? : The environment ID or name}
         {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
+        {--prune : Delete the dumps stored locally, after showing what will go, and exit}
+        {--force : Skip the prune confirmation, for non-interactive use}
         {--download : Always download a fresh dump, ignoring any already on disk}
         {--no-store : Do not keep the dump on disk; restore from a temporary file and delete it}
         {--no-restore : Dump only; do not restore into the local database}
@@ -41,12 +44,70 @@ class LaravelCloudDbDumperCommand extends Command
     public function handle(): int
     {
         try {
-            return $this->backup();
+            return $this->option('prune') ? $this->prune() : $this->backup();
         } catch (Throwable $e) {
             $this->components->error($e->getMessage());
 
             return self::FAILURE;
         }
+    }
+
+    /**
+     * Delete every stored dump, showing the user exactly what is about to go.
+     *
+     * This never talks to Laravel Cloud: it is a local file operation, and
+     * making someone walk an application picker to clear a folder would be
+     * absurd.
+     */
+    protected function prune(): int
+    {
+        // Storage is forced on here regardless of config: files written before
+        // the policy changed still need a way out.
+        $dumpManager = new DumpManager(
+            (string) config('cloud-db-dumper.backup_path'),
+            (array) config('cloud-db-dumper.binaries', []),
+            storeDumps: true,
+        );
+
+        $dumps = $dumpManager->storedDumps();
+
+        if ($dumps === []) {
+            info('No stored dumps found in '.config('cloud-db-dumper.backup_path').'.');
+
+            return self::SUCCESS;
+        }
+
+        $total = array_sum(array_column($dumps, 'size'));
+
+        table(
+            headers: ['Database', 'Driver', 'Taken', 'Size'],
+            rows: array_map(fn (array $dump) => [
+                $dump['database'],
+                $dump['driver'],
+                $dump['date'],
+                $this->humanSize($dump['size']),
+            ], $dumps),
+        );
+
+        warning(sprintf(
+            'Deleting %d dump%s (%s) from %s. This cannot be undone.',
+            count($dumps),
+            count($dumps) === 1 ? '' : 's',
+            $this->humanSize($total),
+            $dumpManager->directory(),
+        ));
+
+        if (! $this->option('force') && ! confirm('Delete these dumps?', default: false)) {
+            note('Nothing was deleted.');
+
+            return self::SUCCESS;
+        }
+
+        $deleted = $dumpManager->delete(array_column($dumps, 'path'));
+
+        info("Deleted {$deleted} dump".($deleted === 1 ? '' : 's').', freeing '.$this->humanSize($total).'.');
+
+        return self::SUCCESS;
     }
 
     protected function backup(): int
