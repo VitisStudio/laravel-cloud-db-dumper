@@ -11,6 +11,7 @@ function tokensFixture(): array
     return [
         ['token' => '1|aaa', 'source' => '~/.config/cloud/config.json', 'organization' => 'Vitis Studio'],
         ['token' => '2|bbb', 'source' => '~/.config/cloud/config.json', 'organization' => 'Sidecar'],
+        ['token' => '3|ccc', 'source' => '~/.config/cloud/config.json', 'organization' => 'Vitis Studio'],
     ];
 }
 
@@ -31,12 +32,26 @@ it('resolves the preferred organization without prompting', function () {
     expect($resolved)->toBe(['organization' => 'Vitis Studio', 'token' => '1|aaa']);
 });
 
-it('takes the sole token when only one organization is authenticated', function () {
+it('takes the sole token when no organization was asked for', function () {
     Process::fake(['*' => Process::result(json_encode([tokensFixture()[1]]))]);
 
-    $resolved = (new OrganizationResolver(new CloudCli))->resolve('Unknown Org');
+    expect((new OrganizationResolver(new CloudCli))->resolve()['organization'])->toBe('Sidecar');
+});
 
-    expect($resolved['organization'])->toBe('Sidecar');
+it('refuses an organization it cannot match, even with one token', function () {
+    Process::fake(['*' => Process::result(json_encode([tokensFixture()[1]]))]);
+
+    // Running against a different organization than the one named is worse
+    // than not running: the old behaviour dumped from it without a word.
+    expect(fn () => (new OrganizationResolver(new CloudCli))->resolve('Unknown Org'))
+        ->toThrow(RuntimeException::class, 'Unable to resolve organization [Unknown Org]. Available organizations: Sidecar.');
+});
+
+it('matches an organization by its slug', function () {
+    Process::fake(['*' => Process::result(json_encode(tokensFixture()))]);
+
+    expect((new OrganizationResolver(new CloudCli))->resolve('vitis-studio')['organization'])
+        ->toBe('Vitis Studio');
 });
 
 it('throws when no tokens are saved', function () {

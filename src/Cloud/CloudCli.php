@@ -64,8 +64,37 @@ class CloudCli
     {
         // --show-sensitive or the CLI returns the token masked to "*****" plus
         // its last four characters, which authenticates as nothing.
-        /** @var array<int, array{token: string, source: string, organization: string}> $tokens */
-        $tokens = $this->json(['auth:token', '--list', '--show-sensitive']);
+        $command = ['auth:token', '--list', '--show-sensitive'];
+
+        try {
+            /** @var array<int, array{token: string, source: string, organization: string}> $tokens */
+            $tokens = $this->json($command);
+        } catch (CloudCliException $e) {
+            if (! $e->requiresAuthentication()) {
+                throw $e;
+            }
+
+            // Listing asks the API who owns each saved token, one call each,
+            // and gives up entirely if any one of them is rejected. The
+            // resolver used by ordinary commands prunes dead tokens as a side
+            // effect, so provoke that once and ask again.
+            try {
+                $this->json(['application:list']);
+            } catch (CloudCliException) {
+                // Expected: it fails for its own reasons. The pruning is the point.
+            }
+
+            try {
+                /** @var array<int, array{token: string, source: string, organization: string}> $tokens */
+                $tokens = $this->json($command);
+            } catch (CloudCliException) {
+                throw new CloudCliException(
+                    'One of the Laravel Cloud API tokens saved on this machine was rejected, so the '
+                    ."organization list could not be read.\n\n"
+                    .'Remove the dead token with `cloud auth:token --remove`, or sign in again with `cloud auth`.'
+                );
+            }
+        }
 
         foreach ($tokens as $token) {
             if (self::looksMasked($token['token'])) {
@@ -115,7 +144,7 @@ class CloudCli
      */
     public function environment(string $environmentId): array
     {
-        return $this->json(['environment:get', $environmentId]);
+        return self::assertIdentity($this->json(['environment:get', $environmentId]), $environmentId, 'environment');
     }
 
     /**
@@ -143,7 +172,37 @@ class CloudCli
      */
     public function clusterWithCredentials(string $clusterId): array
     {
-        return $this->json(['database-cluster:get', $clusterId, '--show-sensitive']);
+        return self::assertIdentity(
+            $this->json(['database-cluster:get', $clusterId, '--show-sensitive']),
+            $clusterId,
+            'database cluster',
+        );
+    }
+
+    /**
+     * Refuse a payload that is not the record we asked for.
+     *
+     * An identifier the CLI cannot resolve is not an error to it: the lookup
+     * throws internally, is swallowed, and the resolver falls back to the sole
+     * candidate in the organization — exit 0, clean JSON, a different record.
+     * For a cluster that fallback carries live credentials, so an id that does
+     * not match is treated as a failure here rather than dumped from.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected static function assertIdentity(array $payload, string $requested, string $what): array
+    {
+        $returned = (string) ($payload['id'] ?? '');
+
+        if ($returned !== '' && $returned !== $requested) {
+            throw new CloudCliException(
+                "Asked the cloud CLI for {$what} \"{$requested}\" and it returned \"{$returned}\" instead. "
+                .'It could not resolve that identifier and fell back to another record, so nothing was read from it.'
+            );
+        }
+
+        return $payload;
     }
 
     /**

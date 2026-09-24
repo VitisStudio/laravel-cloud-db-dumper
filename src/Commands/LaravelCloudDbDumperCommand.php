@@ -30,7 +30,7 @@ class LaravelCloudDbDumperCommand extends Command
     public $signature = 'db:pull
         {application? : The application ID or name}
         {environment? : The environment ID or name}
-        {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
+        {--organization= : Laravel Cloud organization to run as, by name or slug (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
         {--prune : Delete the dumps stored locally, after showing what will go, and exit}
         {--force : Skip the prune confirmation, for non-interactive use}
@@ -155,10 +155,16 @@ class LaravelCloudDbDumperCommand extends Command
         // the database.
         $cloud->ensureSupportedVersion();
 
+        $repository = new GitRepository(getcwd() ?: base_path());
+
         $navigator = new TargetNavigator(
             cloud: $cloud,
-            localConfig: new LocalConfig(base_path('.cloud/config.json')),
-            repository: new GitRepository(base_path()),
+            // The CLI resolves this file from the git root of the invoking
+            // process, not from the Laravel application root. In a monorepo
+            // those differ, and reading the wrong one silently ignores the
+            // project's pinned application and environment.
+            localConfig: new LocalConfig(($repository->root() ?? base_path()).'/.cloud/config.json'),
+            repository: $repository,
         );
         $preferences = new Preferences((string) config('cloud-db-dumper.prefs_file'));
 

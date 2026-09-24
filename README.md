@@ -108,7 +108,7 @@ php artisan db:pull app-9f3c env-2a71
 | ------------------- | ----------------------------------------------------------------- |
 | `application`       | Application ID or name; skips the application prompt              |
 | `environment`       | Environment ID or name; skips the environment prompt              |
-| `--organization=`   | Run against a named Cloud organization ([details](#multiple-cloud-organizations)) |
+| `--organization=`   | Run against a named Cloud organization, by name or slug ([details](#multiple-cloud-organizations)) |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
 | `--download`        | Always fetch a fresh dump, ignoring the ones already on disk ([details](#restoring-an-earlier-dump)) |
 | `--no-store`        | Never leave the dump on disk ([details](#keeping-nothing-on-disk)) |
@@ -153,6 +153,10 @@ with `Multiple API tokens found`.
 This package resolves the organization itself: it asks you once, then forwards the matching token for
 the rest of the run. The organization name is remembered with your other preferences. Only the name —
 the token is never written to disk.
+
+Naming an organization is treated as an assertion: if it matches nothing, the command stops and lists
+what is available, rather than quietly running against a different one. Match is by name or slug — the
+CLI's token listing reports no organization id, so an id cannot be matched.
 
 To skip that prompt entirely, name the organization up front:
 

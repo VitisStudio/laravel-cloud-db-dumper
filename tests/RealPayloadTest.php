@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Process;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
+use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
 
 /**
@@ -55,7 +56,7 @@ it('attaches credentials from a real cluster payload', function () {
     ]);
 
     $target = (new TargetNavigator(new CloudCli))->attachCredentials(
-        new VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget(
+        new DatabaseTarget(
             applicationId: 'app-1',
             applicationName: 'field-ops',
             environmentId: 'env-1',

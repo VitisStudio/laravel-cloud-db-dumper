@@ -31,6 +31,27 @@ class GitRepository
     }
 
     /**
+     * The repository root, or null outside a repository.
+     *
+     * The cloud CLI derives its own .cloud/config.json path this way, from the
+     * working directory of whoever invoked it — so anything hoping to read the
+     * same file has to resolve it the same way rather than from the Laravel
+     * application root, which is a different directory in a monorepo.
+     */
+    public function root(): ?string
+    {
+        $result = Process::path($this->basePath)->run(['git', 'rev-parse', '--show-toplevel']);
+
+        if (! $result->successful()) {
+            return null;
+        }
+
+        $root = trim($result->output());
+
+        return $root !== '' ? $root : null;
+    }
+
+    /**
      * Reduce a remote URL to "owner/repo" (pure).
      *
      * Handles the SSH and HTTPS forms git writes, with or without the .git

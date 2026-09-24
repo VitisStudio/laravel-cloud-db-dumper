@@ -205,3 +205,13 @@ it('reports paths with one separator whatever the platform uses', function () {
     expect($manager->directory())->toBe('C:/app/database/backups')
         ->and($manager->pathFor(pgTarget()))->toBe('C:/app/database/backups/forge_pgsql_2026-06-25.sql');
 });
+
+it('says which binary to change when the server is newer than the client', function () {
+    $raw = 'pg_dump: error: server version: 17.2; pg_dump version: 16.2';
+
+    expect(DumpManager::explainDumpFailure($raw, 'pgsql'))
+        ->toContain('pg_dump')->toContain('PG_DUMP_PATH')
+        ->and(DumpManager::explainDumpFailure($raw, 'mysql'))->toContain('MYSQLDUMP_PATH')
+        // Anything else is passed through untouched.
+        ->and(DumpManager::explainDumpFailure('connection refused', 'pgsql'))->toBe('connection refused');
+});

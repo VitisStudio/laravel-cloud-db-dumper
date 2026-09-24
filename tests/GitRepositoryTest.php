@@ -14,3 +14,11 @@ it('reduces remote urls to owner/repo', function (string $url, ?string $expected
     ['', null],
     ['not-a-remote', null],
 ]);
+
+it('reports the repository root, which is not always the app root', function () {
+    $repository = new GitRepository(__DIR__);
+
+    // This package is itself a repository, so the root resolves from a subdir.
+    expect($repository->root())->toBe(dirname(__DIR__))
+        ->and((new GitRepository(sys_get_temp_dir()))->root())->toBeNull();
+});

@@ -197,3 +197,36 @@ it('recognises a masked token', function () {
         ->and(CloudCli::looksMasked(''))->toBeTrue()
         ->and(CloudCli::looksMasked('3296|g1IXojeNYzSjaa8Ywv44ss3LBpz4sIHV'))->toBeFalse();
 });
+
+it('refuses a payload that is not the record it asked for', function () {
+    // A bogus id 404s internally, the CLI swallows it and returns the sole
+    // record in the organization instead — exit 0, clean JSON, wrong database.
+    Process::fake(['*' => Process::result(json_encode([
+        'id' => 'some-other-cluster', 'name' => 'not what you asked for',
+        'connection' => ['hostname' => 'h', 'password' => 'p'],
+    ]))]);
+
+    expect(fn () => (new CloudCli)->clusterWithCredentials('the-one-i-asked-for'))
+        ->toThrow(CloudCliException::class, 'returned "some-other-cluster" instead');
+});
+
+it('accepts a payload whose id matches', function () {
+    Process::fake(['*' => Process::result(json_encode(['id' => 'mine', 'name' => 'mine']))]);
+
+    expect((new CloudCli)->environment('mine')['id'])->toBe('mine');
+});
+
+it('recovers a token listing that one dead token broke', function () {
+    $tokens = json_encode([['token' => '1|real', 'source' => 'config.json', 'organization' => 'Ram Jack']]);
+
+    Process::fake([
+        '*auth:token*' => Process::sequence()
+            ->push(Process::result(output: '', errorOutput: json_encode([
+                'error' => true, 'message' => 'Unauthorized (401) Response: { "message": "Invalid API token" }',
+            ]), exitCode: 1))
+            ->push(Process::result($tokens)),
+        '*application:list*' => Process::result(output: '', errorOutput: 'Multiple API tokens found.', exitCode: 1),
+    ]);
+
+    expect((new CloudCli)->tokens())->toHaveCount(1);
+});
