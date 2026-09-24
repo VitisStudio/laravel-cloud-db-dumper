@@ -77,6 +77,85 @@ class CloudCli
     }
 
     /**
+     * Decode JSON that may be surrounded by noise another extension wrote to
+     * the same stream (pure). Returns null when there is no JSON in there.
+     *
+     * @return array<int|string, mixed>|null
+     */
+    public static function decodeJson(string $raw): ?array
+    {
+        $raw = trim($raw);
+
+        if ($raw === '') {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        // Drop the noise before looking for structure. Doing it the other way
+        // round finds the "[" in "[Step Debug]" and parses from there.
+        $clean = self::withoutNoise($raw);
+
+        $decoded = json_decode($clean, true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        // A payload usually arrives on one line, so try each in turn.
+        foreach (preg_split('/\R/', $clean) ?: [] as $line) {
+            $decoded = json_decode(trim($line), true);
+
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        // Last resort for pretty-printed output: the outermost structure, the
+        // earliest opening delimiter being the outer one.
+        $candidates = [];
+
+        foreach ([['{', '}'], ['[', ']']] as [$open, $close]) {
+            $first = strpos($clean, $open);
+            $last = strrpos($clean, $close);
+
+            if ($first !== false && $last !== false && $last > $first) {
+                $candidates[$first] = substr($clean, $first, $last - $first + 1);
+            }
+        }
+
+        ksort($candidates);
+
+        foreach ($candidates as $candidate) {
+            $decoded = json_decode($candidate, true);
+
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Strip lines other extensions wrote into the stream, so an error message
+     * shown to the user is the CLI's own (pure).
+     */
+    public static function withoutNoise(string $raw): string
+    {
+        $lines = array_filter(
+            preg_split('/\R/', $raw) ?: [],
+            fn (string $line) => trim($line) !== '' && ! str_starts_with(trim($line), 'Xdebug:'),
+        );
+
+        return trim(implode("\n", $lines));
+    }
+
+    /**
      * Run a cloud command with the read flags and decode its JSON output.
      *
      * @param  array<int, string>  $command
@@ -86,9 +165,14 @@ class CloudCli
     {
         $invocation = $this->binary.' '.implode(' ', $command);
 
-        $environment = $this->apiToken !== null
-            ? ['LARAVEL_CLOUD_TOKEN' => $this->apiToken]
-            : [];
+        // The cloud CLI is itself a PHP program, so it inherits this process's
+        // Xdebug settings and writes step-debug warnings into the very streams
+        // we parse. Turn that off for the child only.
+        $environment = ['XDEBUG_MODE' => 'off'];
+
+        if ($this->apiToken !== null) {
+            $environment['LARAVEL_CLOUD_TOKEN'] = $this->apiToken;
+        }
 
         $result = Process::env($environment)->run([
             $this->binary,
@@ -101,7 +185,7 @@ class CloudCli
         $output = trim($result->output());
         $errorOutput = trim($result->errorOutput());
 
-        $decoded = json_decode($output !== '' ? $output : $errorOutput, true);
+        $decoded = self::decodeJson($output) ?? self::decodeJson($errorOutput);
 
         // Failures arrive as {"error": true, "message": "..."} on STDERR; the
         // CLI's own message is far more useful than the raw stream.
@@ -114,8 +198,12 @@ class CloudCli
         }
 
         if (! $result->successful()) {
+            // Both streams, because a failing run may put its explanation on
+            // either one, and whichever we ignore is the one that mattered.
+            $reported = self::withoutNoise(trim($errorOutput."\n".$output));
+
             throw new CloudCliException(
-                "Cloud CLI command failed: `{$invocation}`.\n".($errorOutput ?: $output),
+                trim("Cloud CLI command failed: `{$invocation}`.\n".$reported),
                 $invocation,
                 $errorOutput ?: $output,
             );
