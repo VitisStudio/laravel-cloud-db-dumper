@@ -2,6 +2,22 @@
 
 All notable changes to `laravel-cloud-db-dumper` will be documented in this file.
 
+## v0.2.0 - Storage controls and CLI-style resolution - 2026-09-24
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### New features
+
+* CLI-style target resolution for db:pull by @acepoblete in https://github.com/VitisStudio/laravel-cloud-db-dumper/pull/3
+* Local dump storage: history, prune, and opt-out by @acepoblete in https://github.com/VitisStudio/laravel-cloud-db-dumper/pull/4
+
+#### Maintenance
+
+* Release notes config by @acepoblete in https://github.com/VitisStudio/laravel-cloud-db-dumper/pull/5
+
+**Full Changelog**: https://github.com/VitisStudio/laravel-cloud-db-dumper/compare/v0.1.0...v0.2.0
+
 ## v0.1.0 - 2026-09-03
 
 Initial release.
