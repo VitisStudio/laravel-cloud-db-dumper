@@ -3,6 +3,7 @@
 namespace VitisStudio\LaravelCloudDbDumper\Commands;
 
 use Illuminate\Console\Command;
+use RuntimeException;
 use Throwable;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
 use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
@@ -29,6 +30,7 @@ class LaravelCloudDbDumperCommand extends Command
         {environment? : The environment ID or name}
         {--organization= : Laravel Cloud organization to run as, by name (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
+        {--no-store : Do not keep the dump on disk; restore from a temporary file and delete it}
         {--no-restore : Dump only; do not restore into the local database}
         {--no-seed : Skip the post-restore seeder step}';
 
@@ -47,6 +49,17 @@ class LaravelCloudDbDumperCommand extends Command
 
     protected function backup(): int
     {
+        // Checked before anything is fetched or asked, so a contradictory pair
+        // of flags fails instantly rather than after the whole walk.
+        $storeDumps = $this->shouldStoreDumps();
+
+        if (! $storeDumps && $this->option('no-restore')) {
+            throw new RuntimeException(
+                'Nothing would come of this run: --no-restore keeps the dump out of your database and '
+                .'dump storage is off, so the dump would be deleted unused. Drop one of the two.'
+            );
+        }
+
         $cloud = new CloudCli((string) config('cloud-db-dumper.cloud_binary', 'cloud'));
         $navigator = new TargetNavigator(
             cloud: $cloud,
@@ -58,18 +71,29 @@ class LaravelCloudDbDumperCommand extends Command
         $target = $this->resolveTarget($navigator, $preferences);
 
         $dumpManager = new DumpManager(
-            $this->backupPath(),
+            $storeDumps ? $this->backupPath() : '',
             (array) config('cloud-db-dumper.binaries', []),
+            $storeDumps,
         );
 
         $dumpFile = $this->produceDump($navigator, $dumpManager, $target);
 
-        if (! $this->option('no-restore') && confirm('Restore this dump into your local database?', default: true)) {
-            $this->restoreLocally($dumpFile);
+        try {
+            if (! $this->option('no-restore') && confirm('Restore this dump into your local database?', default: true)) {
+                $this->restoreLocally($dumpFile);
 
-            if (! $this->option('no-seed')) {
-                $target = $this->runSeeder($target);
+                if (! $this->option('no-seed')) {
+                    $target = $this->runSeeder($target);
+                }
             }
+        } finally {
+            // A dump that was never meant to be kept goes away even when the
+            // restore threw, so production data is not left behind.
+            $dumpManager->discard($dumpFile);
+        }
+
+        if (! $storeDumps) {
+            info('Dump discarded; nothing was left on disk.');
         }
 
         $target = $target->withOrganization($navigator->organization() ?? $target->organizationName);
@@ -142,7 +166,9 @@ class LaravelCloudDbDumperCommand extends Command
             "Dumping {$target->schemaName} ({$target->driver()})...",
         );
 
-        info("Dump written to: {$path}");
+        info($dumpManager->storesDumps()
+            ? "Dump written to: {$path}"
+            : 'Dump written to a temporary file (not stored locally).');
 
         return $path;
     }
@@ -218,6 +244,20 @@ class LaravelCloudDbDumperCommand extends Command
         $organization = (string) ($this->option('organization') ?? config('cloud-db-dumper.organization') ?? '');
 
         return $organization !== '' ? $organization : null;
+    }
+
+    /**
+     * Whether dumps may be kept on disk. The flag wins, then config — so a
+     * team with a data-handling policy can switch storage off for everyone
+     * and not rely on each person remembering the flag.
+     */
+    protected function shouldStoreDumps(): bool
+    {
+        if ($this->option('no-store')) {
+            return false;
+        }
+
+        return (bool) config('cloud-db-dumper.store_dumps', true);
     }
 
     protected function backupPath(): string

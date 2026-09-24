@@ -38,6 +38,21 @@ return [
     */
     'backup_path' => database_path('backups'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Keep dumps on disk
+    |--------------------------------------------------------------------------
+    |
+    | Dumps are written to the backup path above and left there, so a second
+    | pull on the same day can reuse one. Set this to false where a data
+    | handling policy forbids production data at rest on a workstation: the
+    | dump then goes to a private temporary file, is restored, and is deleted
+    | before the command exits. Caching is off in that mode, since nothing is
+    | kept to cache. The --no-store flag switches it off for a single run.
+    |
+    */
+    'store_dumps' => env('CLOUD_DB_DUMPER_STORE_DUMPS', true),
+
     'prefs_file' => base_path('.db-backup-prefs.json'),
 
     /*

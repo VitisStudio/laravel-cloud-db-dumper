@@ -98,6 +98,7 @@ php artisan db:pull app-9f3c env-2a71
 | `application`       | Application ID or name; skips the application prompt              |
 | `environment`       | Environment ID or name; skips the environment prompt              |
 | `--organization=`   | Run against a named Cloud organization (see below)                |
+| `--no-store`        | Never leave the dump on disk (see below)                          |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
 | `--no-seed`         | Skip the post-restore seeder step                                 |
@@ -156,6 +157,7 @@ CLOUD_ORGANIZATION="Acme Inc"
 | `cloud_binary`  | `CLOUD_BINARY`      | `cloud`                            | Path to the Cloud CLI, if it is not on your `PATH` |
 | `organization`  | `CLOUD_ORGANIZATION`| `null`                             | Pin the Cloud organization                         |
 | `backup_path`   | —                   | `database/backups`                 | Where dumps are written                            |
+| `store_dumps`   | `CLOUD_DB_DUMPER_STORE_DUMPS` | `true`                   | Whether dumps are kept on disk at all              |
 | `prefs_file`    | —                   | `.db-backup-prefs.json`            | Where the last target is remembered                |
 | `binaries`      | see below           | `null` (discover on `PATH`)        | Absolute paths to the database client binaries     |
 
@@ -184,6 +186,30 @@ Both belong in your `.gitignore`:
 
 Database credentials are fetched live from Laravel Cloud on every run and held in memory only. They are
 never written to the preferences file, the dump filename, or console output.
+
+### Keeping nothing on disk
+
+A dump is production data sitting on a laptop. Where a data handling policy does not allow that, turn
+storage off and the dump never lands in your project:
+
+```dotenv
+CLOUD_DB_DUMPER_STORE_DUMPS=false
+```
+
+```bash
+php artisan db:pull --no-store
+```
+
+The dump is written to a private temporary directory created at mode `0700`, restored into your local
+database, and deleted before the command exits — including when the restore fails. Same-day caching is
+off in this mode, because there is no longer a file to reuse, so every run downloads afresh.
+
+Setting it in config covers the whole team; `--no-store` covers a single run. `--no-store` together with
+`--no-restore` is refused, since that combination would download a dump and then delete it unused.
+
+The preferences file is a separate thing and is still written. It records the application, environment,
+cluster and database names you picked, and never any credentials — delete it, or point `prefs_file`
+somewhere outside the repository, if even that is more than your policy allows.
 
 ## Contributing
 

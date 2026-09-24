@@ -50,3 +50,57 @@ it('detects an existing cached copy for today', function () {
 it('refuses to dump a target without credentials', function () {
     (new DumpManager($this->backupDir))->dump(pgTarget());
 })->throws(InvalidArgumentException::class);
+
+it('writes outside the project and caches nothing when storage is off', function () {
+    $manager = new DumpManager('/should/not/be/used', [], storeDumps: false);
+    $target = makeTarget();
+
+    $path = $manager->pathFor($target);
+
+    expect($manager->storesDumps())->toBeFalse()
+        ->and($path)->toStartWith(rtrim(sys_get_temp_dir(), '/').'/laravel-cloud-db-dumper-')
+        ->and($path)->not->toContain('/should/not/be/used')
+        ->and($manager->directory())->toBe($manager->directory());
+});
+
+it('reports no cached copy when storage is off even if a file is sitting there', function () {
+    $manager = new DumpManager('/should/not/be/used', [], storeDumps: false);
+    $target = makeTarget();
+
+    File::ensureDirectoryExists(dirname($manager->pathFor($target)));
+    File::put($manager->pathFor($target), '-- dump');
+
+    expect($manager->cachedCopyExists($target))->toBeFalse();
+
+    $manager->discard($manager->pathFor($target));
+});
+
+it('discards an unstored dump and its directory', function () {
+    $manager = new DumpManager('/should/not/be/used', [], storeDumps: false);
+    $target = makeTarget();
+    $path = $manager->pathFor($target);
+
+    File::ensureDirectoryExists(dirname($path));
+    File::put($path, '-- production data');
+
+    $manager->discard($path);
+
+    expect(File::exists($path))->toBeFalse()
+        ->and(File::isDirectory(dirname($path)))->toBeFalse();
+});
+
+it('never deletes a dump the user asked to keep', function () {
+    $directory = sys_get_temp_dir().'/cloud-db-dumper-keep-'.uniqid();
+    $manager = new DumpManager($directory);
+    $target = makeTarget();
+    $path = $manager->pathFor($target);
+
+    File::ensureDirectoryExists($directory);
+    File::put($path, '-- dump');
+
+    $manager->discard($path);
+
+    expect(File::exists($path))->toBeTrue();
+
+    File::deleteDirectory($directory);
+});
