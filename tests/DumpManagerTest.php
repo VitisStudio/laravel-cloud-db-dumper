@@ -142,7 +142,9 @@ it('lists every stored dump of one database, newest first', function () {
 
     expect($dumps)->toHaveCount(3)
         ->and(array_column($dumps, 'date'))->toBe(['2026-06-25', '2026-06-20', '2026-01-02'])
-        ->and($dumps[0]['path'])->toBe($this->backupDir.'/forge_pgsql_2026-06-25.sql')
+        // Compared by basename: the separator differs per platform.
+        ->and(basename($dumps[0]['path']))->toBe('forge_pgsql_2026-06-25.sql')
+        ->and(File::exists($dumps[0]['path']))->toBeTrue()
         ->and($dumps[0]['size'])->toBe(2048);
 });
 

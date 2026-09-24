@@ -56,7 +56,7 @@ class DumpManager
             Carbon::now()->format('Y-m-d'),
         );
 
-        return rtrim($this->directory(), '/').'/'.$filename;
+        return self::normalisePath(rtrim($this->directory(), '/\\')).'/'.$filename;
     }
 
     /**
@@ -132,7 +132,7 @@ class DumpManager
             }
 
             $dumps[] = [
-                'path' => $file->getPathname(),
+                'path' => self::normalisePath($file->getPathname()),
                 'database' => $parsed['database'],
                 'driver' => $parsed['driver'],
                 'date' => $parsed['date'],
@@ -168,6 +168,15 @@ class DumpManager
         }
 
         return $deleted;
+    }
+
+    /**
+     * Use one separator everywhere, so a path from a directory listing and one
+     * built by pathFor() are the same string on Windows too (pure).
+     */
+    public static function normalisePath(string $path): string
+    {
+        return str_replace('\\', '/', $path);
     }
 
     /**
