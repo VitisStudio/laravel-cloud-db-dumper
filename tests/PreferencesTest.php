@@ -53,3 +53,39 @@ it('returns null for a malformed preferences file', function () {
 
     expect((new Preferences($this->prefsPath))->load())->toBeNull();
 });
+
+it('keeps the client choice alongside the target', function () {
+    $path = sys_get_temp_dir().'/prefs-'.uniqid().'.json';
+    $preferences = new Preferences($path);
+
+    $preferences->save(makeTarget());
+    $preferences->saveClients('pgsql', [
+        'driver' => 'pgsql',
+        'serverVersion' => '18.1',
+        'dump' => '/opt/pg/18.1/bin/pg_dump',
+        'restore' => '/opt/pg/18.1/bin/psql',
+    ]);
+
+    // Saving one must not discard the other.
+    expect($preferences->load()->schemaName)->toBe('forge')
+        ->and($preferences->clients('pgsql')['serverVersion'])->toBe('18.1')
+        ->and($preferences->clients('mysql'))->toBeNull();
+
+    // And the target survives being written after the clients were.
+    $preferences->save(makeTarget('mysql'));
+    expect($preferences->clients('pgsql')['dump'])->toBe('/opt/pg/18.1/bin/pg_dump');
+
+    @unlink($path);
+});
+
+it('still reads a preferences file written before clients existed', function () {
+    $path = sys_get_temp_dir().'/prefs-legacy-'.uniqid().'.json';
+    file_put_contents($path, json_encode(makeTarget()->toArray()));
+
+    $preferences = new Preferences($path);
+
+    expect($preferences->load()?->schemaName)->toBe('forge')
+        ->and($preferences->clients('pgsql'))->toBeNull();
+
+    @unlink($path);
+});

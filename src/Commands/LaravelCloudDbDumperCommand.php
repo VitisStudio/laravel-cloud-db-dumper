@@ -13,7 +13,9 @@ use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
 use VitisStudio\LaravelCloudDbDumper\Dumpers\DumpManager;
 use VitisStudio\LaravelCloudDbDumper\Restorers\RestoreManager;
 use VitisStudio\LaravelCloudDbDumper\Seeders\SeederDiscovery;
+use VitisStudio\LaravelCloudDbDumper\Support\DatabaseClients;
 use VitisStudio\LaravelCloudDbDumper\Support\GitRepository;
+use VitisStudio\LaravelCloudDbDumper\Support\LocalDatabase;
 use VitisStudio\LaravelCloudDbDumper\Support\Preferences;
 
 use function Laravel\Prompts\confirm;
@@ -27,6 +29,13 @@ use function Laravel\Prompts\warning;
 
 class LaravelCloudDbDumperCommand extends Command
 {
+    /**
+     * Client binary paths resolved for this run, keyed by binary name.
+     *
+     * @var array<string, string|null>
+     */
+    protected array $binaries = [];
+
     public $signature = 'db:pull
         {application? : The application ID or name}
         {environment? : The environment ID or name}
@@ -35,6 +44,7 @@ class LaravelCloudDbDumperCommand extends Command
         {--prune : Delete the dumps stored locally, after showing what will go, and exit}
         {--force : Skip the prune confirmation, for non-interactive use}
         {--download : Always download a fresh dump, ignoring any already on disk}
+        {--clients : Re-choose the database client binaries for this machine}
         {--no-store : Do not keep the dump on disk; restore from a temporary file and delete it}
         {--no-restore : Dump only; do not restore into the local database}
         {--no-seed : Skip the post-restore seeder step}';
@@ -170,9 +180,11 @@ class LaravelCloudDbDumperCommand extends Command
 
         $target = $this->resolveTarget($navigator, $preferences);
 
+        $binaries = $this->resolveClients($preferences, $target->driver());
+
         $dumpManager = new DumpManager(
             $storeDumps ? $this->backupPath() : '',
-            (array) config('cloud-db-dumper.binaries', []),
+            $binaries,
             $storeDumps,
         );
 
@@ -321,6 +333,130 @@ class LaravelCloudDbDumperCommand extends Command
         return $bytes.' B';
     }
 
+    /**
+     * Which client binaries to run, asked once and then remembered.
+     *
+     * The version matters: a client older than the server it reads is refused
+     * outright, and a dump taken from a newer server may not load into an older
+     * one. Machines commonly have several versions installed with only one on
+     * the PATH, so the first run establishes the choice and later runs speak up
+     * only when the local database has moved underneath it.
+     *
+     * @return array<string, string|null>
+     */
+    protected function resolveClients(Preferences $preferences, string $driver): array
+    {
+        $configured = (array) config('cloud-db-dumper.binaries', []);
+        $dumpBinary = $driver === 'mysql' ? 'mysqldump' : 'pg_dump';
+        $restoreBinary = $driver === 'mysql' ? 'mysql' : 'psql';
+
+        // An explicit path in config is the author's decision; do not override
+        // it, and do not nag about it.
+        if (($configured[$dumpBinary] ?? null) && ($configured[$restoreBinary] ?? null)) {
+            return $this->binaries = $configured;
+        }
+
+        $serverVersion = (new LocalDatabase((string) config('database.default')))->serverVersion();
+        $saved = $preferences->clients($driver);
+
+        if ($saved !== null && ! $this->option('clients')) {
+            $reason = $this->staleClientReason($saved, $serverVersion);
+
+            if ($reason === null) {
+                return $this->binaries = $configured + [
+                    $dumpBinary => $saved['dump'],
+                    $restoreBinary => $saved['restore'],
+                ];
+            }
+
+            warning($reason);
+        }
+
+        $clients = new DatabaseClients;
+        $dumps = $clients->discover($dumpBinary);
+        $restores = $clients->discover($restoreBinary);
+
+        if ($dumps === []) {
+            note("No {$dumpBinary} found on this machine; falling back to whatever the PATH resolves.");
+
+            return $this->binaries = $configured;
+        }
+
+        $chosen = [
+            'driver' => $driver,
+            'serverVersion' => $serverVersion,
+            'dump' => $this->chooseClient($dumpBinary, $dumps, $serverVersion, 'reads the Cloud database'),
+            'restore' => $restores === []
+                ? $restoreBinary
+                : $this->chooseClient($restoreBinary, $restores, $serverVersion, 'writes to your local database'),
+        ];
+
+        $preferences->saveClients($driver, $chosen);
+
+        return $this->binaries = $configured + [
+            $dumpBinary => $chosen['dump'],
+            $restoreBinary => $chosen['restore'],
+        ];
+    }
+
+    /**
+     * Why a remembered choice can no longer be trusted, or null when it can.
+     *
+     * @param  array{driver: string, serverVersion: string|null, dump: string, restore: string}  $saved
+     */
+    protected function staleClientReason(array $saved, ?string $serverVersion): ?string
+    {
+        foreach ([$saved['dump'], $saved['restore']] as $path) {
+            if (str_contains($path, '/') && ! is_executable($path)) {
+                return "The database client remembered for this project is gone: {$path}.";
+            }
+        }
+
+        $was = $saved['serverVersion'];
+
+        if ($serverVersion === null || $was === null || $was === $serverVersion) {
+            return null;
+        }
+
+        return "Your local database is now {$serverVersion}, and these client binaries were chosen for {$was}.";
+    }
+
+    /**
+     * @param  array<int, array{path: string, version: string}>  $clients
+     */
+    protected function chooseClient(string $binary, array $clients, ?string $serverVersion, string $role): string
+    {
+        $best = DatabaseClients::bestFor($clients, $serverVersion);
+
+        if (count($clients) === 1) {
+            note("Using {$binary} ".$clients[0]['version']." ({$clients[0]['path']})");
+
+            return $clients[0]['path'];
+        }
+
+        $options = [];
+        foreach ($clients as $client) {
+            $label = $binary.' '.$client['version'].'  —  '.$client['path'];
+
+            if ($serverVersion !== null && DatabaseClients::major($client['version']) === DatabaseClients::major($serverVersion)) {
+                $label .= '  (matches your local database)';
+            }
+
+            $options['client:'.$client['path']] = $label;
+        }
+
+        $local = $serverVersion !== null ? " Your local database is {$serverVersion}." : '';
+
+        $selected = select(
+            label: "Which {$binary} should be used? It {$role}.{$local}",
+            options: $options,
+            default: $best !== null ? 'client:'.$best['path'] : null,
+            scroll: 10,
+        );
+
+        return substr((string) $selected, strlen('client:'));
+    }
+
     protected function restoreLocally(string $dumpFile): void
     {
         $connectionName = (string) config('database.default');
@@ -336,7 +472,7 @@ class LaravelCloudDbDumperCommand extends Command
 
         $restorer = new RestoreManager(
             $localConfig,
-            (array) config('cloud-db-dumper.binaries', []),
+            $this->binaries,
             $connectionName,
         );
 

@@ -111,6 +111,7 @@ php artisan db:pull app-9f3c env-2a71
 | `--organization=`   | Run against a named Cloud organization, by name or slug ([details](#multiple-cloud-organizations)) |
 | `--fresh`           | Ignore saved preferences and pick the database again              |
 | `--download`        | Always fetch a fresh dump, ignoring the ones already on disk ([details](#restoring-an-earlier-dump)) |
+| `--clients`         | Re-choose the dump and restore binaries ([details](#database-client-versions)) |
 | `--no-store`        | Never leave the dump on disk ([details](#keeping-nothing-on-disk)) |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
 | `--no-seed`         | Skip the post-restore seeder step                                 |
@@ -268,6 +269,37 @@ php artisan db:pull --prune --force
 ```
 
 Without `--force`, a non-interactive run declines and deletes nothing.
+
+### Database client versions
+
+`pg_dump` refuses to read a server newer than itself, and a dump taken from a newer server may not load
+into an older one. Most machines have several versions installed with only one of them on the `PATH`,
+which is usually the wrong one.
+
+So on the first run `db:pull` asks your local database what version it is, finds every `pg_dump` and
+`psql` (or `mysqldump` and `mysql`) on the machine — the `PATH`, DBngin, Postgres.app, Homebrew — and
+picks the one that fits:
+
+```
+ ┌ Which pg_dump should be used? It reads the Cloud database. Your local database is 18.1. ┐
+ │ › pg_dump 18.1  —  /Users/Shared/DBngin/postgresql/18.1/bin/pg_dump  (matches your local database)
+ │   pg_dump 17.4  —  /opt/homebrew/opt/libpq/bin/pg_dump
+ │   pg_dump 16.2  —  /Users/Shared/DBngin/postgresql/16.2/bin/pg_dump
+ └──────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+The choice is remembered in the preferences file with the local server version it was made for. Later
+runs say nothing — until something moves:
+
+- your local database is now a different version than when you chose
+- the binary you chose has been uninstalled
+
+Then it says what changed and asks again. `--clients` re-opens the question at any time, and setting
+`PG_DUMP_PATH`/`PSQL_PATH` (or the MySQL equivalents) in config skips it entirely — an explicit path is
+taken as a decision already made.
+
+A local database that is not running is not an error: the version simply stays unknown and the newest
+client is preferred.
 
 ### Keeping nothing on disk
 
