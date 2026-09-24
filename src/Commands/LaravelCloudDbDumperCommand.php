@@ -112,7 +112,27 @@ class LaravelCloudDbDumperCommand extends Command
 
     protected function cloud(): CloudCli
     {
-        return new CloudCli((string) config('cloud-db-dumper.cloud_binary', 'cloud'));
+        return new CloudCli($this->cloudBinary());
+    }
+
+    /**
+     * The configured binary, else the project's own copy of the CLI, else
+     * whatever is on the PATH.
+     *
+     * Laravel recommends installing the Cloud CLI as a project dev dependency,
+     * so a project-local binary is the likelier one to exist.
+     */
+    protected function cloudBinary(): string
+    {
+        $configured = (string) (config('cloud-db-dumper.cloud_binary') ?? '');
+
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $local = base_path('vendor/bin/cloud');
+
+        return is_executable($local) ? $local : 'cloud';
     }
 
     protected function backup(): int

@@ -9,10 +9,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Path to the Laravel Cloud CLI binary used to navigate applications,
-    | environments and database clusters. Defaults to "cloud" on the PATH.
+    | environments and database clusters. Left null, the project's own
+    | vendor/bin/cloud is used when present — Laravel recommends installing the
+    | CLI as a dev dependency — and "cloud" on the PATH otherwise.
     |
     */
-    'cloud_binary' => env('CLOUD_BINARY', 'cloud'),
+    'cloud_binary' => env('CLOUD_BINARY'),
 
     /*
     |--------------------------------------------------------------------------
