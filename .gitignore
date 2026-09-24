@@ -34,3 +34,7 @@ testbench.yaml
 # Cloud DB Dumper
 /database/backups
 .db-backup-prefs.json
+
+# Captured Cloud payloads. Redacted of secrets, but still someone's real
+# application and database names — sanitise before committing as fixtures.
+/tests/fixtures/cloud
