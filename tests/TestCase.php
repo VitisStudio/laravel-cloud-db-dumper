@@ -22,10 +22,13 @@ class TestCase extends Orchestra
         $prompt = new ReflectionClass(Prompt::class);
         $prompt->setStaticPropertyValue('terminal', new Terminal);
         // fallbackWhen() is `$condition || $shouldFallback`, so it can only ever
-        // switch fallback on. Reflection is the only way back — to the platform
-        // default, since Prompts cannot render interactively on Windows at all
-        // and relies on the fallback Laravel installs there.
-        $prompt->setStaticPropertyValue('shouldFallback', PHP_OS_FAMILY === 'Windows');
+        // switch fallback on. Reflection is the only way back.
+        //
+        // Off, including on Windows: Prompt::prompt() returns the default for a
+        // non-interactive prompt before it ever checks the platform, so tests
+        // exercise the real path. Only a test driving a faked keyboard needs
+        // interactivity, and there is no such thing on Windows to drive.
+        $prompt->setStaticPropertyValue('shouldFallback', false);
         Prompt::interactive(false);
 
         Factory::guessFactoryNamesUsing(
