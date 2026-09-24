@@ -13,6 +13,15 @@ use Illuminate\Support\Facades\Process;
  */
 class CloudCli
 {
+    /**
+     * Oldest cloud CLI this package works with.
+     *
+     * 0.5 introduced the per-organization API tokens we resolve, and 0.5.2 and
+     * earlier ask the API for an include it no longer allows, so every
+     * database-cluster:list fails with a 400 that says nothing about versions.
+     */
+    public const MINIMUM_VERSION = '0.5.3';
+
     public function __construct(
         protected readonly string $binary = 'cloud',
         protected readonly ?string $apiToken = null,
@@ -74,6 +83,47 @@ class CloudCli
     public function clusterWithCredentials(string $clusterId): array
     {
         return $this->json(['database-cluster:get', $clusterId, '--show-sensitive']);
+    }
+
+    /**
+     * The installed CLI's version, or null when it cannot be determined.
+     */
+    public function version(): ?string
+    {
+        $result = Process::env(['XDEBUG_MODE' => 'off'])->run([$this->binary, '--version']);
+
+        if (! $result->successful()) {
+            return null;
+        }
+
+        return self::parseVersion(self::withoutNoise($result->output()));
+    }
+
+    /**
+     * Advice to add to a failure when the CLI is too old to be trusted, or
+     * null when its version is fine or unknown.
+     */
+    public function outdatedHint(): ?string
+    {
+        $version = $this->version();
+
+        if ($version === null || version_compare($version, self::MINIMUM_VERSION, '>=')) {
+            return null;
+        }
+
+        return "The cloud CLI is v{$version}; this package needs v".self::MINIMUM_VERSION
+            .' or newer. Older versions ask the Laravel Cloud API for an include it rejects, '
+            .'which fails every database lookup. Update with `composer global update laravel/cloud-cli`.';
+    }
+
+    /**
+     * Pull a version out of `cloud --version` output (pure).
+     */
+    public static function parseVersion(string $raw): ?string
+    {
+        return preg_match('/\bv?(\d+\.\d+\.\d+)\b/', $raw, $matches) === 1
+            ? $matches[1]
+            : null;
     }
 
     /**

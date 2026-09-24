@@ -127,3 +127,31 @@ it('handles pretty-printed json and noise-only streams', function () {
         ->and(CloudCli::decodeJson(''))->toBeNull()
         ->and(CloudCli::withoutNoise($noise."\nreal error\n".$noise))->toBe('real error');
 });
+
+it('parses the cli version out of its banner', function () {
+    expect(CloudCli::parseVersion('  Cloud  v0.5.2'))->toBe('0.5.2')
+        ->and(CloudCli::parseVersion("Xdebug: [Step Debug] nope\n Cloud  v0.6.1 "))->toBe('0.6.1')
+        ->and(CloudCli::parseVersion('no version here'))->toBeNull();
+});
+
+it('explains an out-of-date cli instead of leaving a bare api error', function () {
+    Process::fake(['*' => Process::result(' Cloud  v0.5.2')]);
+
+    $hint = (new CloudCli)->outdatedHint();
+
+    expect($hint)->toContain('v0.5.2')
+        ->and($hint)->toContain('v'.CloudCli::MINIMUM_VERSION)
+        ->and($hint)->toContain('composer global update laravel/cloud-cli');
+});
+
+it('stays quiet when the cli is new enough', function () {
+    Process::fake(['*' => Process::result(' Cloud  v0.6.1')]);
+
+    expect((new CloudCli)->outdatedHint())->toBeNull();
+});
+
+it('stays quiet when the version cannot be determined', function () {
+    Process::fake(['*' => Process::result(output: '', errorOutput: 'not found', exitCode: 127)]);
+
+    expect((new CloudCli)->outdatedHint())->toBeNull();
+});

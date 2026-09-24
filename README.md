@@ -57,7 +57,7 @@ php artisan vendor:publish --tag="cloud-db-dumper-config"
 | ---------------------- | ------------------------------------------------- |
 | PHP                    | `^8.3`                                            |
 | Laravel                | 11, 12 or 13                                      |
-| Laravel Cloud CLI      | `>= 0.5`, authenticated                           |
+| Laravel Cloud CLI      | `>= 0.5.3`, authenticated                         |
 | Database client tools  | `pg_dump` + `psql`, or `mysqldump` + `mysql`      |
 
 The Cloud CLI does the authentication, so this package never asks you for a token:
@@ -66,6 +66,10 @@ The Cloud CLI does the authentication, so this package never asks you for a toke
 composer global require laravel/cloud-cli
 cloud auth
 ```
+
+Keep the CLI current. Versions before 0.5.3 ask the Laravel Cloud API for an include it no longer
+allows, so every database lookup fails with a bare `400 Bad Request` that says nothing about versions.
+`db:pull` detects that case and tells you to run `composer global update laravel/cloud-cli`.
 
 ## Usage
 
