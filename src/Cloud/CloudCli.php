@@ -47,8 +47,30 @@ class CloudCli
      */
     public function tokens(): array
     {
-        /** @var array<int, array{token: string, source: string, organization: string}> */
-        return $this->json(['auth:token', '--list']);
+        // --show-sensitive or the CLI returns the token masked to "*****" plus
+        // its last four characters, which authenticates as nothing.
+        /** @var array<int, array{token: string, source: string, organization: string}> $tokens */
+        $tokens = $this->json(['auth:token', '--list', '--show-sensitive']);
+
+        foreach ($tokens as $token) {
+            if (self::looksMasked($token['token'])) {
+                throw new CloudCliException(
+                    'The cloud CLI returned masked API tokens, so there is nothing to authenticate with. '
+                    .'Check that `cloud auth:token --list --json --show-sensitive` prints full tokens, '
+                    .'and update the CLI if it does not.'
+                );
+            }
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * Whether a token came back masked rather than usable (pure).
+     */
+    public static function looksMasked(string $token): bool
+    {
+        return $token === '' || str_contains($token, '*');
     }
 
     /**

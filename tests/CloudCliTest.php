@@ -169,3 +169,31 @@ it('checks the version before it walks the user through any pickers', function (
         'application:list',
     ));
 });
+
+it('asks for unmasked tokens, since masked ones authenticate as nothing', function () {
+    Process::fake(['*' => Process::result(json_encode([
+        ['token' => '1|real-token', 'source' => 'config.json', 'organization' => 'Ram Jack'],
+    ]))]);
+
+    (new CloudCli)->tokens();
+
+    Process::assertRan(fn ($process) => str_contains(
+        is_array($process->command) ? implode(' ', $process->command) : (string) $process->command,
+        'auth:token --list --show-sensitive',
+    ));
+});
+
+it('refuses a masked token instead of forwarding one that will 401', function () {
+    Process::fake(['*' => Process::result(json_encode([
+        ['token' => '*****7ed7', 'source' => 'config.json', 'organization' => 'Ram Jack'],
+    ]))]);
+
+    expect(fn () => (new CloudCli)->tokens())
+        ->toThrow(CloudCliException::class, 'masked API tokens');
+});
+
+it('recognises a masked token', function () {
+    expect(CloudCli::looksMasked('*****7ed7'))->toBeTrue()
+        ->and(CloudCli::looksMasked(''))->toBeTrue()
+        ->and(CloudCli::looksMasked('3296|g1IXojeNYzSjaa8Ywv44ss3LBpz4sIHV'))->toBeFalse();
+});
