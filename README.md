@@ -1,84 +1,217 @@
-# This is my package laravel-cloud-db-dumper
+# Laravel Cloud DB Dumper
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/vitisstudio/laravel-cloud-db-dumper.svg?style=flat-square)](https://packagist.org/packages/vitisstudio/laravel-cloud-db-dumper)
-[![GitHub Tests Action Status](https://github.com/spatie/package-laravel-cloud-db-dumper-laravel/actions/workflows/run-tests.yml/badge.svg)](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions?query=workflow%3Arun-tests+branch%3Amain)
-[![GitHub Code Style Action Status](https://github.com/spatie/package-laravel-cloud-db-dumper-laravel/actions/workflows/fix-php-code-style-issues.yml/badge.svg)](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
+[![Tests](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/run-tests.yml/badge.svg?branch=main)](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/run-tests.yml)
+[![Code Style](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/fix-php-code-style-issues.yml/badge.svg?branch=main)](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/fix-php-code-style-issues.yml)
 [![Total Downloads](https://img.shields.io/packagist/dt/vitisstudio/laravel-cloud-db-dumper.svg?style=flat-square)](https://packagist.org/packages/vitisstudio/laravel-cloud-db-dumper)
 
-This is where your description should go. Limit it to a paragraph or two. Consider adding a small example.
+Pull a [Laravel Cloud](https://cloud.laravel.com) database down to your machine with one command.
 
-## Support us
-
-[<img src="https://github-ads.s3.eu-central-1.amazonaws.com/laravel-cloud-db-dumper.jpg?t=1" width="419px" />](https://spatie.be/github-ad-click/laravel-cloud-db-dumper)
-
-We invest a lot of resources into creating [best in class open source packages](https://spatie.be/open-source). You can support us by [buying one of our paid products](https://spatie.be/open-source/support-us).
-
-We highly appreciate you sending us a postcard from your hometown, mentioning which of our package(s) you are using. You'll find our address on [our contact page](https://spatie.be/about-us). We publish all received postcards on [our virtual postcard wall](https://spatie.be/open-source/postcards).
-
-## Installation
-
-You can install the package via composer:
+`php artisan db:pull` resolves your Cloud target — organization, application, environment, database —
+fetches the connection credentials for it, dumps it to a file, and optionally restores it into your local
+database and runs a seeder to scrub what you just pulled down. It only asks about the parts it cannot
+work out for itself.
 
 ```bash
-composer require vitisstudio/laravel-cloud-db-dumper
+php artisan db:pull
 ```
 
-You can publish and run the migrations with:
+```
+ Application: acme-web
+
+ ┌ Environment ─────────────────────────────────────────────────┐
+ │ › production                                                 │
+ │   staging                                                    │
+ └──────────────────────────────────────────────────────────────┘
+
+ Dump written to: database/backups/forge_pgsql_2026-09-24.sql
+ Local database restored.
+```
+
+## Install it as a dev dependency
 
 ```bash
-php artisan vendor:publish --tag="laravel-cloud-db-dumper-migrations"
-php artisan migrate
+composer require --dev vitisstudio/laravel-cloud-db-dumper
 ```
 
-You can publish the config file with:
+**This package belongs in `require-dev` and nowhere else.** It exists to move production data onto a
+developer workstation: it reads your Laravel Cloud API tokens, fetches live database credentials, and
+overwrites your local database. None of that should be reachable from a deployed application. Installing
+it into `require` ships that capability to production for no benefit.
+
+The service provider is auto-discovered, so there is nothing to register.
+
+Publishing the config file is optional — the defaults work:
 
 ```bash
-php artisan vendor:publish --tag="laravel-cloud-db-dumper-config"
+php artisan vendor:publish --tag="cloud-db-dumper-config"
 ```
 
-This is the contents of the published config file:
+## Requirements
 
-```php
-return [
-];
-```
+| Requirement            | Version                                           |
+| ---------------------- | ------------------------------------------------- |
+| PHP                    | `^8.3`                                            |
+| Laravel                | 11, 12 or 13                                      |
+| Laravel Cloud CLI      | `>= 0.5`, authenticated                           |
+| Database client tools  | `pg_dump` + `psql`, or `mysqldump` + `mysql`      |
 
-Optionally, you can publish the views using
+The Cloud CLI does the authentication, so this package never asks you for a token:
 
 ```bash
-php artisan vendor:publish --tag="laravel-cloud-db-dumper-views"
+composer global require laravel/cloud-cli
+cloud auth
 ```
 
 ## Usage
 
-```php
-$laravelCloudDbDumper = new VitisStudio\LaravelCloudDbDumper();
-echo $laravelCloudDbDumper->echoPhrase('Hello, VitisStudio!');
+```bash
+php artisan db:pull
 ```
 
-## Testing
+The command walks you through it:
+
+1. **Pick a target.** Organization, application, environment, then database. Anything that can be
+   worked out is not asked about — see [How the target is resolved](#how-the-target-is-resolved).
+2. **Choose where dumps land.** Defaults to `database/backups`.
+3. **Reuse or refetch.** If a dump for that database already exists from today, you are offered the
+   cached copy instead of downloading it again.
+4. **Restore locally.** Opt in, after an explicit warning naming the local database about to be
+   overwritten. Active connections to it are terminated first so the restore is not blocked.
+5. **Seed.** Optionally run one of your seeders against the restored data — the place to scrub
+   emails, tokens and anything else that should not sit on a laptop.
+
+Your choices are remembered, so the next run is a single confirmation.
+
+### Arguments and options
+
+Name the application and environment the way you would with any `cloud` command — an ID or a name,
+either one:
 
 ```bash
-composer test
+php artisan db:pull acme-web staging
+php artisan db:pull app-9f3c env-2a71
 ```
 
-## Changelog
+| Argument / option   | Effect                                                            |
+| ------------------- | ----------------------------------------------------------------- |
+| `application`       | Application ID or name; skips the application prompt              |
+| `environment`       | Environment ID or name; skips the environment prompt              |
+| `--organization=`   | Run against a named Cloud organization (see below)                |
+| `--fresh`           | Ignore saved preferences and pick the database again              |
+| `--no-restore`      | Dump only; leave the local database untouched                     |
+| `--no-seed`         | Skip the post-restore seeder step                                 |
 
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
+```bash
+php artisan db:pull staging --no-seed
+```
+
+Naming an application or environment overrides the saved target, so you never have to answer
+"use the saved one?" with "no" first.
+
+### How the target is resolved
+
+`db:pull` resolves each part the way the Cloud CLI's own commands do, and only asks when something is
+genuinely ambiguous:
+
+| Part             | Resolution order                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| **Organization** | `--organization` → `CLOUD_ORGANIZATION` → saved preference → `.cloud/config.json` → prompt |
+| **Application**  | argument → `.cloud/config.json` → the app deployed from your git remote → sole → prompt    |
+| **Environment**  | argument → `.cloud/config.json` → sole → prompt, defaulting to the app's default env       |
+| **Database**     | sole → prompt, defaulting to the one the environment is wired to                           |
+
+If you have already run `cloud repo:config` in the project, `db:pull` inherits those defaults and can
+run without a single prompt. Anything resolved for you is echoed, so a quiet run still tells you what
+it picked.
+
+The environment is deliberately *not* inferred from your current git branch, unlike `cloud deploy`.
+This command overwrites your local database, so which environment it reads from stays an explicit
+choice.
+
+## Multiple Cloud organizations
+
+Cloud CLI 0.5 holds one API token per organization, and it only prompts you to choose between them when
+it is attached to a terminal — which it never is when a package shells out to it. Left alone, it fails
+with `Multiple API tokens found`.
+
+This package resolves the organization itself: it asks you once, then forwards the matching token for
+the rest of the run. The organization name is remembered with your other preferences. Only the name —
+the token is never written to disk.
+
+To skip that prompt entirely, name the organization up front:
+
+```bash
+php artisan db:pull --organization="Acme Inc"
+```
+
+```dotenv
+CLOUD_ORGANIZATION="Acme Inc"
+```
+
+## Configuration
+
+| Key             | Env                 | Default                            | Purpose                                            |
+| --------------- | ------------------- | ---------------------------------- | -------------------------------------------------- |
+| `cloud_binary`  | `CLOUD_BINARY`      | `cloud`                            | Path to the Cloud CLI, if it is not on your `PATH` |
+| `organization`  | `CLOUD_ORGANIZATION`| `null`                             | Pin the Cloud organization                         |
+| `backup_path`   | —                   | `database/backups`                 | Where dumps are written                            |
+| `prefs_file`    | —                   | `.db-backup-prefs.json`            | Where the last target is remembered                |
+| `binaries`      | see below           | `null` (discover on `PATH`)        | Absolute paths to the database client binaries     |
+
+Point the package at binaries that live outside your `PATH` — a DBngin install, for instance:
+
+```dotenv
+PG_DUMP_PATH="/Users/Shared/DBngin/postgresql/17.2/bin/pg_dump"
+PSQL_PATH="/Users/Shared/DBngin/postgresql/17.2/bin/psql"
+MYSQLDUMP_PATH=
+MYSQL_PATH=
+```
+
+## What gets written to your project
+
+| Path                      | Contents                                                  |
+| ------------------------- | --------------------------------------------------------- |
+| `database/backups/*.sql`  | Dumps, named `{database}_{driver}_{Y-m-d}.sql`            |
+| `.db-backup-prefs.json`   | The last target you picked, plus your default seeder      |
+
+Both belong in your `.gitignore`:
+
+```gitignore
+/database/backups
+.db-backup-prefs.json
+```
+
+Database credentials are fetched live from Laravel Cloud on every run and held in memory only. They are
+never written to the preferences file, the dump filename, or console output.
 
 ## Contributing
 
-Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
+```bash
+composer test      # Pest
+composer analyse   # PHPStan / Larastan, level 5
+composer format    # Pint
+```
 
-## Security Vulnerabilities
+Pull requests are welcome. Please keep the test suite and PHPStan green.
 
-Please review [our security policy](../../security/policy) on how to report security vulnerabilities.
+## Security
+
+Please review [our security policy](SECURITY.md) for how to report a vulnerability. Do not open a public
+issue for security problems.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for what has changed recently.
 
 ## Credits
 
 - [Dan Poblete](https://github.com/acepoblete)
 - [All Contributors](../../contributors)
 
+Built on [spatie/db-dumper](https://github.com/spatie/db-dumper) and
+[spatie/laravel-package-tools](https://github.com/spatie/laravel-package-tools).
+
 ## License
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+The MIT License (MIT). Please see [LICENSE.md](LICENSE.md) for more information.
