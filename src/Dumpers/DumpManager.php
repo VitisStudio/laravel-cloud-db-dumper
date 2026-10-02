@@ -293,6 +293,12 @@ class DumpManager
             ->setUserName($connection['username'])
             ->setPassword($connection['password']);
 
+        if ($target->driver() !== 'mysql') {
+            // Ownership and grants name cloud roles that no local machine has,
+            // and a restore that stops on the first error would stop on those.
+            $dumper->addExtraOption('--no-owner')->addExtraOption('--no-privileges');
+        }
+
         $binaryDirectory = $this->binaryDirectoryFor($target->driver());
 
         if ($binaryDirectory !== null) {

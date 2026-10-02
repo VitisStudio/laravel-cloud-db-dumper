@@ -62,6 +62,117 @@ class RestoreManager
     }
 
     /**
+     * Empty the local database so a dump that only creates can land in it.
+     *
+     * pg_dump's plain output carries no DROP statements, so against a database
+     * that already holds the tables every statement fails — and psql exits 0
+     * all the same, leaving a restore that reported success and changed nothing.
+     */
+    public function resetSchema(): int
+    {
+        // mysqldump writes its own DROP TABLE IF EXISTS, so the tables it is
+        // about to create are already gone by the time it creates them.
+        if ($this->driver() === 'mysql') {
+            return 0;
+        }
+
+        $connection = DB::connection($this->connectionName);
+
+        $connection->statement('DROP SCHEMA IF EXISTS public CASCADE');
+        $connection->statement('CREATE SCHEMA public');
+
+        return 1;
+    }
+
+    /**
+     * Write a copy of the dump with every ownership and privilege statement gone.
+     *
+     * A cloud dump assigns ownership and default privileges to roles that only
+     * the provider has — Laravel Cloud runs on Neon, so cloud_admin and
+     * neon_superuser turn up — and no local machine can be made to look like
+     * that without inventing roles nobody asked for. Dumps taken from here on
+     * are made with --no-owner --no-privileges; the ones already on disk are
+     * not, so the restore strips them either way.
+     *
+     * @return string the path to the stripped copy, to be deleted by the caller
+     */
+    public function withoutOwnership(string $dumpFile): string
+    {
+        $source = fopen($dumpFile, 'r');
+
+        if ($source === false) {
+            throw new RuntimeException("Dump file could not be read: {$dumpFile}");
+        }
+
+        $target = (string) tempnam(sys_get_temp_dir(), 'restore-');
+        $output = fopen($target, 'w');
+
+        if ($output === false) {
+            fclose($source);
+
+            throw new RuntimeException("Could not open a temporary file to prepare the restore: {$target}");
+        }
+
+        $inCopyData = false;
+        $dropping = false;
+
+        try {
+            while (($line = fgets($source)) !== false) {
+                // COPY data is raw text that can spell anything, including a
+                // line that reads exactly like a GRANT, so the rows between the
+                // COPY and its terminator are passed through untouched.
+                if ($inCopyData) {
+                    $inCopyData = rtrim($line, "\r\n") !== '\\.';
+                    fwrite($output, $line);
+
+                    continue;
+                }
+
+                if ($dropping) {
+                    $dropping = ! $this->endsStatement($line);
+
+                    continue;
+                }
+
+                if (preg_match('/^COPY\s.*\sFROM\s+stdin;\s*$/', $line) === 1) {
+                    $inCopyData = true;
+                    fwrite($output, $line);
+
+                    continue;
+                }
+
+                if ($this->isOwnershipStatement($line)) {
+                    $dropping = ! $this->endsStatement($line);
+
+                    continue;
+                }
+
+                fwrite($output, $line);
+            }
+        } finally {
+            fclose($source);
+            fclose($output);
+        }
+
+        return $target;
+    }
+
+    /**
+     * Whether a line opens a statement that hands something to a role (pure).
+     */
+    protected function isOwnershipStatement(string $line): bool
+    {
+        return preg_match('/^ALTER\s+[A-Z][A-Z ]*\s+\S.*\sOWNER\s+TO\s/', $line) === 1
+            || preg_match('/^ALTER\s+DEFAULT\s+PRIVILEGES\b/', $line) === 1
+            || preg_match('/^(GRANT|REVOKE)\b/', $line) === 1;
+    }
+
+    protected function endsStatement(string $line): bool
+    {
+        return preg_match('/;\s*$/', $line) === 1;
+    }
+
+    /**
      * Restore the dump file into the local database.
      */
     public function restore(string $dumpFile): ProcessResult
@@ -70,19 +181,29 @@ class RestoreManager
             throw new RuntimeException("Dump file not found: {$dumpFile}");
         }
 
-        [$command, $environment] = $this->driver() === 'mysql'
-            ? $this->mySqlRestoreCommand($dumpFile)
-            : $this->postgresRestoreCommand($dumpFile);
+        $prepared = $this->driver() === 'mysql'
+            ? $dumpFile
+            : $this->withoutOwnership($dumpFile);
 
-        $result = Process::env($environment)->run($command);
+        try {
+            [$command, $environment] = $this->driver() === 'mysql'
+                ? $this->mySqlRestoreCommand($prepared)
+                : $this->postgresRestoreCommand($prepared);
 
-        if (! $result->successful()) {
-            throw new RuntimeException(
-                "Restore failed.\n".trim($result->errorOutput() ?: $result->output())
-            );
+            $result = Process::env($environment)->run($command);
+
+            if (! $result->successful()) {
+                throw new RuntimeException(
+                    "Restore failed.\n".trim($result->errorOutput() ?: $result->output())
+                );
+            }
+
+            return $result;
+        } finally {
+            if ($prepared !== $dumpFile) {
+                @unlink($prepared);
+            }
         }
-
-        return $result;
     }
 
     /**
@@ -116,8 +237,11 @@ class RestoreManager
     {
         $binary = $this->binary('psql', 'psql');
 
+        // ON_ERROR_STOP because psql's default is to report each failed
+        // statement and still exit 0, and a whole dump can fail that way
+        // without the restore ever being called a failure.
         $command = sprintf(
-            '%s --host=%s --port=%s --username=%s --dbname=%s --file=%s',
+            '%s --host=%s --port=%s --username=%s --dbname=%s --set=ON_ERROR_STOP=1 --single-transaction --file=%s',
             $binary,
             escapeshellarg((string) $this->localConfig['host']),
             escapeshellarg((string) $this->localConfig['port']),
