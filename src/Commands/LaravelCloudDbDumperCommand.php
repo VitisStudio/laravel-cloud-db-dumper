@@ -191,12 +191,14 @@ class LaravelCloudDbDumperCommand extends Command
         $dumpFile = $this->produceDump($navigator, $dumpManager, $target);
 
         try {
-            if (! $this->option('no-restore') && confirm('Restore this dump into your local database?', default: true)) {
+            if (! $this->option('no-restore') && $this->confirmRestore()) {
                 $this->restoreLocally($dumpFile);
 
                 if (! $this->option('no-seed')) {
                     $target = $this->runSeeder($target);
                 }
+            } elseif (! $this->option('no-restore')) {
+                note('Restore skipped.');
             }
         } finally {
             // A dump that was never meant to be kept goes away even when the
@@ -459,18 +461,65 @@ class LaravelCloudDbDumperCommand extends Command
         return substr((string) $selected, strlen('client:'));
     }
 
+    /**
+     * Ask once, after naming the database that goes away, whether to restore.
+     *
+     * One prompt, not two: a second confirmation defaulting to No swallowed the
+     * answer to the first and skipped the restore for anyone who just hits Enter.
+     */
+    protected function confirmRestore(): bool
+    {
+        $this->drainInput();
+
+        warning('This will overwrite your local "'.$this->localDatabaseName().'" database.');
+
+        return confirm('Restore this dump into your local database?', default: true);
+    }
+
+    /**
+     * Throw away anything typed before the question was asked.
+     *
+     * Prompts reads whatever the terminal is already holding, so a key pressed
+     * during the dump answers the next question with its default and submits it
+     * before it has rendered — the answer the user then gives goes nowhere.
+     */
+    protected function drainInput(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows' || ! defined('STDIN') || ! stream_isatty(STDIN)) {
+            return;
+        }
+
+        // The line discipline holds a keystroke until Enter, so canonical mode
+        // has to go before the buffer can be read, and the mode it is restored
+        // to has to be the one Prompts will later capture as the original.
+        $mode = trim((string) shell_exec('stty -g 2>/dev/null'));
+
+        exec('stty -icanon -echo 2>/dev/null');
+
+        stream_set_blocking(STDIN, false);
+
+        while (($chunk = fread(STDIN, 1024)) !== false && $chunk !== '') {
+            // Discarded.
+        }
+
+        stream_set_blocking(STDIN, true);
+
+        if ($mode !== '') {
+            exec('stty '.escapeshellarg($mode).' 2>/dev/null');
+        }
+    }
+
+    protected function localDatabaseName(): string
+    {
+        $connectionName = (string) config('database.default');
+
+        return (string) config("database.connections.{$connectionName}.database");
+    }
+
     protected function restoreLocally(string $dumpFile): void
     {
         $connectionName = (string) config('database.default');
         $localConfig = (array) config("database.connections.{$connectionName}");
-
-        warning("This will overwrite your local \"{$localConfig['database']}\" database.");
-
-        if (! confirm('Continue with the restore?', default: false)) {
-            note('Restore skipped.');
-
-            return;
-        }
 
         $restorer = new RestoreManager(
             $localConfig,
@@ -480,6 +529,7 @@ class LaravelCloudDbDumperCommand extends Command
 
         spin(function () use ($restorer, $dumpFile): void {
             $restorer->killActiveConnections();
+            $restorer->resetSchema();
             $restorer->restore($dumpFile);
         }, 'Killing active connections and restoring...');
 
