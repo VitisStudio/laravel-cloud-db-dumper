@@ -59,6 +59,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Tables restored empty
+    |--------------------------------------------------------------------------
+    |
+    | With --skip-data and no table names, these tables keep their definitions
+    | but none of their rows. They hold state that belongs to the environment
+    | it came from: queued work another environment would run, sessions and
+    | reset tokens issued there, and cache and monitoring history that is
+    | wrong anywhere else. Names may be bare or schema-qualified.
+    |
+    */
+    'skip_data_tables' => [
+        'cache',
+        'cache_locks',
+        'sessions',
+        'jobs',
+        'job_batches',
+        'failed_jobs',
+        'password_reset_tokens',
+        'telescope_entries',
+        'telescope_entries_tags',
+        'telescope_monitoring',
+        'pulse_values',
+        'pulse_entries',
+        'pulse_aggregates',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Dump / restore binaries
     |--------------------------------------------------------------------------
     |

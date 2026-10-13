@@ -3,12 +3,18 @@
 namespace VitisStudio\LaravelCloudDbDumper\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Laravel\Prompts\Elements\KeyValueList;
+use Laravel\Prompts\Prompt;
+use Laravel\Prompts\Support\Logger;
 use RuntimeException;
 use Throwable;
 use VitisStudio\LaravelCloudDbDumper\Cloud\CloudCli;
 use VitisStudio\LaravelCloudDbDumper\Cloud\DatabaseTarget;
 use VitisStudio\LaravelCloudDbDumper\Cloud\LocalConfig;
+use VitisStudio\LaravelCloudDbDumper\Cloud\PushGuard;
 use VitisStudio\LaravelCloudDbDumper\Cloud\TargetNavigator;
 use VitisStudio\LaravelCloudDbDumper\Dumpers\DumpManager;
 use VitisStudio\LaravelCloudDbDumper\Restorers\RestoreManager;
@@ -18,13 +24,18 @@ use VitisStudio\LaravelCloudDbDumper\Support\GitRepository;
 use VitisStudio\LaravelCloudDbDumper\Support\LocalDatabase;
 use VitisStudio\LaravelCloudDbDumper\Support\Preferences;
 
+use function Laravel\Prompts\callout;
+use function Laravel\Prompts\clear;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\info;
-use function Laravel\Prompts\note;
+use function Laravel\Prompts\intro;
+use function Laravel\Prompts\notify;
+use function Laravel\Prompts\outro;
 use function Laravel\Prompts\select;
-use function Laravel\Prompts\spin;
 use function Laravel\Prompts\table;
+use function Laravel\Prompts\task;
 use function Laravel\Prompts\text;
+use function Laravel\Prompts\title;
 use function Laravel\Prompts\warning;
 
 class LaravelCloudDbDumperCommand extends Command
@@ -36,30 +47,74 @@ class LaravelCloudDbDumperCommand extends Command
      */
     protected array $binaries = [];
 
+    /**
+     * The runtime connection a push writes through.
+     */
+    protected const PUSH_CONNECTION = 'cloud-db-dumper-push';
+
     public $signature = 'db:pull
         {application? : The application ID or name}
         {environment? : The environment ID or name}
         {--organization= : Laravel Cloud organization to run as, by name or slug (when several are authenticated)}
         {--fresh : Ignore saved preferences and re-select the database}
         {--prune : Delete the dumps stored locally, after showing what will go, and exit}
-        {--force : Skip the prune confirmation, for non-interactive use}
+        {--to= : Push the dump into the Cloud database of this environment instead of your local one}
+        {--force : Skip the prune and push confirmations, for non-interactive use}
         {--download : Always download a fresh dump, ignoring any already on disk}
         {--clients : Re-choose the database client binaries for this machine}
         {--no-store : Do not keep the dump on disk; restore from a temporary file and delete it}
         {--no-restore : Dump only; do not restore into the local database}
-        {--no-seed : Skip the post-restore seeder step}';
+        {--no-seed : Skip the post-restore seeder step}
+        {--skip-data=* : Restore these tables with no rows; alone, the configured cache, session and queue tables}';
 
-    public $description = 'Dump a Laravel Cloud database and restore it into your local database';
+    public $description = 'Dump a Laravel Cloud database and restore it into your local database, or push it into another environment';
 
     public function handle(): int
     {
+        $this->takeOverTerminal();
+
         try {
             return $this->option('prune') ? $this->prune() : $this->backup();
         } catch (Throwable $e) {
-            $this->components->error($e->getMessage());
+            callout('db:pull stopped', $e->getMessage(), 'error');
 
             return self::FAILURE;
         }
+    }
+
+    /**
+     * Whether a person can answer a question. Prompts answers with defaults
+     * when input is not a terminal even without -n, so both are checked.
+     */
+    protected function canAsk(): bool
+    {
+        return $this->input->isInteractive() && defined('STDIN') && stream_isatty(STDIN);
+    }
+
+    /**
+     * Start from an empty screen, so what follows reads as one run rather
+     * than more lines under whatever the terminal already held.
+     */
+    protected function takeOverTerminal(): void
+    {
+        // A real terminal, not whether colour was detected: colour can be off
+        // in a terminal that clears perfectly well, and a pipe or log file
+        // should never receive the escape codes.
+        if (! $this->canAsk() || ! defined('STDOUT') || ! stream_isatty(STDOUT)) {
+            return;
+        }
+
+        // Someone is at a terminal answering prompts, so the output is theirs.
+        // Tools that rewrite output for AI agents (laravel/pao) key off the
+        // environment, which an editor's terminal can inherit, and a prompt
+        // stripped of its colour no longer shows which answer is selected.
+        $this->output = new OutputStyle($this->input, $this->output->getOutput());
+        $this->output->setDecorated(true);
+        Prompt::setOutput($this->output);
+
+        clear();
+        title('db:pull');
+        intro($this->option('prune') ? ' db:pull · prune ' : ' db:pull ');
     }
 
     /**
@@ -82,7 +137,7 @@ class LaravelCloudDbDumperCommand extends Command
         $dumps = $dumpManager->storedDumps();
 
         if ($dumps === []) {
-            info('No stored dumps found in '.config('cloud-db-dumper.backup_path').'.');
+            outro('No stored dumps in '.config('cloud-db-dumper.backup_path').'.');
 
             return self::SUCCESS;
         }
@@ -108,14 +163,14 @@ class LaravelCloudDbDumperCommand extends Command
         ));
 
         if (! $this->option('force') && ! confirm('Delete these dumps?', default: false)) {
-            note('Nothing was deleted.');
+            outro('Nothing was deleted.');
 
             return self::SUCCESS;
         }
 
         $deleted = $dumpManager->delete(array_column($dumps, 'path'));
 
-        info("Deleted {$deleted} dump".($deleted === 1 ? '' : 's').', freeing '.$this->humanSize($total).'.');
+        outro("Deleted {$deleted} dump".($deleted === 1 ? '' : 's').', freeing '.$this->humanSize($total).'.');
 
         return self::SUCCESS;
     }
@@ -151,6 +206,10 @@ class LaravelCloudDbDumperCommand extends Command
         // of flags fails instantly rather than after the whole walk.
         $storeDumps = $this->shouldStoreDumps();
 
+        if ($this->pushing() && $this->option('no-restore')) {
+            throw new RuntimeException('--to restores into another environment, so it cannot be combined with --no-restore.');
+        }
+
         if (! $storeDumps && $this->option('no-restore')) {
             throw new RuntimeException(
                 'Nothing would come of this run: --no-restore keeps the dump out of your database and '
@@ -180,7 +239,13 @@ class LaravelCloudDbDumperCommand extends Command
 
         $target = $this->resolveTarget($navigator, $preferences);
 
+        // Resolved before the dump, so a destination that cannot be pushed
+        // into is refused before production has been read.
+        $destination = $this->pushing() ? $this->resolveDestination($navigator, $target) : null;
+
         $binaries = $this->resolveClients($preferences, $target->driver());
+
+        $this->summarize($navigator, $target, $destination);
 
         $dumpManager = new DumpManager(
             $storeDumps ? $this->backupPath() : '',
@@ -191,14 +256,20 @@ class LaravelCloudDbDumperCommand extends Command
         $dumpFile = $this->produceDump($navigator, $dumpManager, $target);
 
         try {
-            if (! $this->option('no-restore') && $this->confirmRestore()) {
+            if ($destination !== null) {
+                $this->push($navigator, $target, $destination, $dumpFile);
+            } elseif (! $this->option('no-restore') && $this->confirmRestore()) {
                 $this->restoreLocally($dumpFile);
 
                 if (! $this->option('no-seed')) {
                     $target = $this->runSeeder($target);
                 }
+
+                $this->finish("Restored {$target->environmentName} into your local \"{$this->localDatabaseName()}\" database.");
             } elseif (! $this->option('no-restore')) {
-                note('Restore skipped.');
+                outro('Restore skipped. Your local database is untouched.');
+            } else {
+                outro('Dump taken. Nothing was restored.');
             }
         } finally {
             // A dump that was never meant to be kept goes away even when the
@@ -206,14 +277,15 @@ class LaravelCloudDbDumperCommand extends Command
             $dumpManager->discard($dumpFile);
         }
 
-        if (! $storeDumps) {
-            info('Dump discarded; nothing was left on disk.');
+        // The saved target is what a bare db:pull offers next time, and a
+        // push should not change what that is.
+        if ($destination !== null) {
+            return self::SUCCESS;
         }
 
         $target = $target->withOrganization($navigator->organization() ?? $target->organizationName);
 
         $preferences->save($target);
-        info('Saved preferences to '.config('cloud-db-dumper.prefs_file'));
 
         return self::SUCCESS;
     }
@@ -260,7 +332,7 @@ class LaravelCloudDbDumperCommand extends Command
             $chosen = $this->chooseExistingDump($existing, $target);
 
             if ($chosen !== null) {
-                info("Using local dump: {$chosen}");
+                info("Using the dump on disk: {$chosen}");
 
                 return $chosen;
             }
@@ -269,16 +341,24 @@ class LaravelCloudDbDumperCommand extends Command
         // The navigator spins around its own CLI calls.
         $target = $navigator->attachCredentials($target);
 
-        $path = spin(
-            fn () => $dumpManager->dump($target),
-            "Dumping {$target->schemaName} ({$target->driver()})...",
+        return task(
+            "Dumping {$target->environmentName}",
+            function (Logger $log) use ($dumpManager, $target): string {
+                /** @var array{hostname: string} $connection */
+                $connection = $target->connection;
+
+                $log->line("Reading {$target->schemaName} from {$connection['hostname']}");
+
+                $path = $dumpManager->dump($target);
+
+                $log->success('Dumped '.$this->humanSize((int) filesize($path)).($dumpManager->storesDumps()
+                    ? " to {$path}"
+                    : ' to a temporary file, deleted once this run ends'));
+
+                return $path;
+            },
+            keepSummary: true,
         );
-
-        info($dumpManager->storesDumps()
-            ? "Dump written to: {$path}"
-            : 'Dump written to a temporary file (not stored locally).');
-
-        return $path;
     }
 
     /**
@@ -381,7 +461,7 @@ class LaravelCloudDbDumperCommand extends Command
         $restores = $clients->discover($restoreBinary);
 
         if ($dumps === []) {
-            note("No {$dumpBinary} found on this machine; falling back to whatever the PATH resolves.");
+            warning("No {$dumpBinary} found on this machine; falling back to whatever the PATH resolves.");
 
             return $this->binaries = $explicit;
         }
@@ -433,8 +513,6 @@ class LaravelCloudDbDumperCommand extends Command
         $best = DatabaseClients::bestFor($clients, $serverVersion);
 
         if (count($clients) === 1) {
-            note("Using {$binary} ".$clients[0]['version']." ({$clients[0]['path']})");
-
             return $clients[0]['path'];
         }
 
@@ -525,24 +603,244 @@ class LaravelCloudDbDumperCommand extends Command
             $localConfig,
             $this->binaries,
             $connectionName,
+            $this->skipDataTables(),
         );
 
-        spin(function () use ($restorer, $dumpFile): void {
-            $restorer->killActiveConnections();
-            $restorer->resetSchema();
-            $restorer->restore($dumpFile);
-        }, 'Killing active connections and restoring...');
-
-        info('Local database restored.');
+        $this->restoreWith($restorer, $dumpFile, "Restoring into your local \"{$this->localDatabaseName()}\" database");
     }
 
-    protected function runSeeder(DatabaseTarget $target): DatabaseTarget
+    /**
+     * Say what was resolved, once and in one place, before anything is read
+     * or written: where the data comes from, where it goes, and with what.
+     */
+    protected function summarize(TargetNavigator $navigator, DatabaseTarget $source, ?DatabaseTarget $destination): void
+    {
+        $plan = [];
+
+        $organization = $navigator->organization() ?? $source->organizationName;
+
+        if ($organization !== null) {
+            $plan['Organization'] = $organization;
+        }
+
+        $plan['From'] = $this->describeTarget($source);
+
+        $plan['Into'] = match (true) {
+            $destination !== null => $this->describeTarget($destination).' on Laravel Cloud',
+            (bool) $this->option('no-restore') => 'nowhere, dump only',
+            default => 'your local "'.$this->localDatabaseName().'" database',
+        };
+
+        $skipped = $this->option('no-restore') ? [] : $this->skipDataTables();
+
+        if ($skipped !== []) {
+            $plan['Empty tables'] = implode(', ', $skipped);
+        }
+
+        foreach ($this->binaries as $binary => $path) {
+            if ($path !== null && $path !== '' && in_array($binary, ['pg_dump', 'psql', 'mysqldump', 'mysql'], true)) {
+                $plan[$binary] = $path;
+            }
+        }
+
+        callout($destination !== null ? 'Push' : 'Pull', [new KeyValueList($plan)]);
+    }
+
+    protected function describeTarget(DatabaseTarget $target): string
+    {
+        return "{$target->applicationName} › {$target->environmentName} ({$target->clusterName} / {$target->schemaName})";
+    }
+
+    /**
+     * Tables to restore without rows: those named on the flag, and the
+     * configured list when the flag is given with no value.
+     *
+     * @return array<int, string>
+     */
+    protected function skipDataTables(): array
+    {
+        $given = (array) $this->option('skip-data');
+
+        if ($given === []) {
+            return [];
+        }
+
+        $tables = [];
+
+        foreach ($given as $value) {
+            $tables = array_merge($tables, $value === null || $value === ''
+                ? (array) config('cloud-db-dumper.skip_data_tables', [])
+                : explode(',', (string) $value));
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', $tables), fn ($table) => $table !== '')));
+    }
+
+    /**
+     * Empty the target and load the dump, narrating it table by table.
+     *
+     * psql echoes each COPY statement before reporting its row count, so the
+     * table name is held until the count that belongs to it arrives.
+     */
+    protected function restoreWith(RestoreManager $restorer, string $dumpFile, string $label): void
+    {
+        task($label, function (Logger $log) use ($restorer, $dumpFile): void {
+            $closed = $restorer->killActiveConnections();
+            $log->success($closed === 1 ? 'Closed 1 open connection' : "Closed {$closed} open connections");
+
+            $restorer->resetSchema();
+            $log->success('Emptied the database');
+
+            $table = null;
+            $tables = 0;
+            $rows = 0;
+
+            $restorer->restore($dumpFile, function (string $line) use ($log, &$table, &$tables, &$rows): void {
+                if (preg_match('/^COPY\s+(\S+)\s.*FROM\s+stdin/i', $line, $copy) === 1) {
+                    $table = $copy[1];
+
+                    return;
+                }
+
+                if ($table !== null && preg_match('/^COPY\s+(\d+)$/', trim($line), $count) === 1) {
+                    $tables++;
+                    $rows += (int) $count[1];
+                    $log->line(sprintf('%s  %s rows', $table, number_format((int) $count[1])));
+                    $table = null;
+                }
+            });
+
+            $log->success(sprintf('Loaded %s rows across %d tables', number_format($rows), $tables));
+        }, keepSummary: true);
+    }
+
+    /**
+     * Close the run: on screen, and as a desktop notification for whoever
+     * went to do something else while it ran.
+     */
+    protected function finish(string $message): void
+    {
+        outro($message);
+
+        if ($this->canAsk()) {
+            notify('db:pull', $message);
+        }
+    }
+
+    protected function pushing(): bool
+    {
+        return (string) ($this->option('to') ?? '') !== '';
+    }
+
+    protected function resolveDestination(TargetNavigator $navigator, DatabaseTarget $source): DatabaseTarget
+    {
+        $destination = $navigator->navigate($source->applicationId, (string) $this->option('to'));
+
+        PushGuard::assertDestination($source, $destination);
+
+        return $destination;
+    }
+
+    /**
+     * Replace the destination's database with the dump.
+     *
+     * Ownership never reaches the destination: the dump is taken with
+     * --no-owner --no-privileges and the restore strips any that an older dump
+     * still carries, so every object lands owned by the destination's own user
+     * instead of naming roles that only exist on the source.
+     */
+    protected function push(TargetNavigator $navigator, DatabaseTarget $source, DatabaseTarget $destination, string $dumpFile): void
+    {
+        $source = $navigator->attachCredentials($source);
+        $destination = $navigator->attachCredentials($destination);
+
+        PushGuard::assertDistinctConnections($source, $destination);
+
+        if (! $this->confirmPush($source, $destination)) {
+            outro('Push skipped. Nothing on Laravel Cloud was changed.');
+
+            return;
+        }
+
+        $this->registerPushConnection($destination);
+
+        try {
+            $restorer = new RestoreManager(
+                (array) config('database.connections.'.self::PUSH_CONNECTION),
+                $this->binaries,
+                self::PUSH_CONNECTION,
+                $this->skipDataTables(),
+            );
+
+            $this->restoreWith($restorer, $dumpFile, "Restoring into {$destination->environmentName}");
+
+            if (! $this->option('no-seed')) {
+                $this->runSeeder($destination, self::PUSH_CONNECTION);
+            }
+
+            $this->finish("Pushed {$source->environmentName} into {$destination->environmentName}.");
+        } finally {
+            DB::purge(self::PUSH_CONNECTION);
+        }
+    }
+
+    /**
+     * Make the destination type its own name, since Enter alone should never
+     * be enough to empty a Cloud database.
+     */
+    protected function confirmPush(DatabaseTarget $source, DatabaseTarget $destination): bool
+    {
+        callout('This replaces a Laravel Cloud database', sprintf(
+            'Everything in %s (%s / %s) is dropped and replaced with %s. There is no undo.',
+            $destination->environmentName,
+            $destination->clusterName,
+            $destination->schemaName,
+            $source->environmentName,
+        ), 'warning');
+
+        if (! $this->canAsk()) {
+            if (! $this->option('force')) {
+                throw new RuntimeException('Pushing without a prompt needs --force.');
+            }
+
+            return true;
+        }
+
+        $this->drainInput();
+
+        return text(
+            label: "Type \"{$destination->environmentName}\" to push",
+            required: true,
+        ) === $destination->environmentName;
+    }
+
+    protected function registerPushConnection(DatabaseTarget $destination): void
+    {
+        /** @var array{hostname: string, port: int|string, username: string, password: string} $connection */
+        $connection = $destination->connection;
+
+        config(['database.connections.'.self::PUSH_CONNECTION => [
+            'driver' => 'pgsql',
+            'host' => $connection['hostname'],
+            'port' => $connection['port'],
+            'database' => $destination->schemaName,
+            'username' => $connection['username'],
+            'password' => $connection['password'],
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => 'require',
+        ]]);
+
+        DB::purge(self::PUSH_CONNECTION);
+    }
+
+    protected function runSeeder(DatabaseTarget $target, ?string $connection = null): DatabaseTarget
     {
         $seeders = (new SeederDiscovery(base_path('database/seeders')))->all();
 
         if ($seeders === []) {
-            note('No seeders found in database/seeders — skipping.');
-
             return $target;
         }
 
@@ -565,8 +863,19 @@ class LaravelCloudDbDumperCommand extends Command
             return $target->withDefaultSeeder(null);
         }
 
-        $this->call('db:seed', ['--class' => $chosen, '--force' => true]);
-        info("Ran seeder: {$chosen}");
+        task("Running {$chosen}", function (Logger $log) use ($chosen, $connection): void {
+            $exitCode = $this->callSilently('db:seed', array_filter([
+                '--class' => $chosen,
+                '--database' => $connection,
+                '--force' => true,
+            ], fn ($value) => $value !== null));
+
+            if ($exitCode !== self::SUCCESS) {
+                throw new RuntimeException("{$chosen} exited with code {$exitCode}.");
+            }
+
+            $log->success("Ran {$chosen}");
+        }, keepSummary: true);
 
         return $target->withDefaultSeeder((string) $chosen);
     }

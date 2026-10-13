@@ -4,25 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`vitisstudio/laravel-cloud-db-dumper` — a Laravel package (not an app) scaffolded
-from the [spatie/package-skeleton-laravel](https://github.com/spatie/package-skeleton-laravel)
-template. **Status: bootstrap skeleton.** All non-scaffolding code is still
-placeholder — the intended feature (dumping a database on Laravel Cloud) is not
-yet implemented.
+`vitisstudio/laravel-cloud-db-dumper` — a Laravel package (not an app) that ships one artisan command,
+`db:pull`. It dumps a Laravel Cloud database through the `cloud` CLI and restores it into the local
+database, or with `--to` into another environment's Cloud database. User-facing behaviour is documented
+in [README.md](README.md); keep the two in step.
 
 - Namespace: `VitisStudio\LaravelCloudDbDumper\` → `src/`
-- PHP `^8.3`, Laravel `^11 || ^12 || ^13` (via `illuminate/contracts`)
-- Built on `spatie/laravel-package-tools` (`PackageServiceProvider`)
+- PHP `^8.3`, Laravel `^11 || ^12 || ^13`, Laravel Prompts `^0.3.24`
+- Built on `spatie/laravel-package-tools` and `spatie/db-dumper`
 
 ## Layout
 
-- [src/LaravelCloudDbDumperServiceProvider.php](src/LaravelCloudDbDumperServiceProvider.php) — registers config, views, migration, command via `configurePackage()`
-- [src/LaravelCloudDbDumper.php](src/LaravelCloudDbDumper.php) — main class, **empty body** (placeholder)
-- [src/Commands/LaravelCloudDbDumperCommand.php](src/Commands/LaravelCloudDbDumperCommand.php) — artisan command `laravel-cloud-db-dumper`, placeholder (`handle()` just prints "All done")
-- [src/Facades/LaravelCloudDbDumper.php](src/Facades/LaravelCloudDbDumper.php) — facade fronting the main class
-- [config/cloud-db-dumper.php](config/cloud-db-dumper.php) — config, **empty array**
-- [database/migrations/create_cloud_db_dumper_table.php.stub](database/migrations/create_cloud_db_dumper_table.php.stub) — migration stub
-- `tests/` — Pest 4 suite (`ExampleTest`, `ArchTest`), Testbench `TestCase`
+- [src/Commands/LaravelCloudDbDumperCommand.php](src/Commands/LaravelCloudDbDumperCommand.php) — `db:pull`: flow, prompts, screen
+- [src/Cloud/](src/Cloud/) — the `cloud` CLI wrapper, target resolution (`TargetNavigator`), organizations, `PushGuard`
+- [src/Dumpers/DumpManager.php](src/Dumpers/DumpManager.php) — dump files: naming, storage, prune
+- [src/Restorers/RestoreManager.php](src/Restorers/RestoreManager.php) — kill connections, reset schema, strip ownership and skipped rows, run `psql`/`mysql`
+- [src/Support/](src/Support/) — client binary discovery, preferences file, git remote, local DB version
+- [config/cloud-db-dumper.php](config/cloud-db-dumper.php) — config, including `skip_data_tables`
+- [resources/boost/skills/laravel-cloud-db-dumper/SKILL.md](resources/boost/skills/laravel-cloud-db-dumper/SKILL.md) — Boost skill telling agents in consuming apps how to run `db:pull` without a terminal. Update it with any flag or default change.
 
 ## Commands
 
@@ -33,21 +32,33 @@ composer analyse        # PHPStan / Larastan, level 5 (src, config, database)
 composer format         # Laravel Pint formatter
 ```
 
-`composer install` triggers `prepare` → `testbench package:discover`.
+If PHPStan's parallel worker dies with `Child process error (exit code 255)`, run it single-process:
+`vendor/bin/phpstan analyse --memory-limit=1G --debug`.
 
 ## Conventions
 
-- Tests: **Pest 4** (not raw PHPUnit). Suite bootstraps through `Orchestra\Testbench`. Pest root config in [tests/Pest.php](tests/Pest.php), base case in [tests/TestCase.php](tests/TestCase.php).
-- `ArchTest` forbids `dd`, `dump`, `ray` in shipped code — do not leave debug calls.
-- Run `composer format` (Pint) before committing; PHPStan must stay green at level 5.
-- Package autoloads via the `extra.laravel` block in `composer.json` (provider + `LaravelCloudDbDumper` alias) — no manual registration needed.
+- Tests: **Pest 4**, bootstrapped through `Orchestra\Testbench`. Keep command building and parsing in
+  pure methods so they test without a database or binaries.
+- `ArchTest` forbids `dd`, `dump`, `ray` in shipped code.
+- Run `composer format` before committing; PHPStan stays green at level 5.
+- **Screen output is Laravel Prompts only**: questions (`select`, `confirm`, `text`) and output (`intro`,
+  `callout`, `task`, `info`, `warning`, `outro`). Do not mix in `$this->components` or `$this->info()`.
+  Long work goes in `task()` with a `Logger`; its callback runs in this process, and only the renderer
+  is forked.
+- **Without a terminal every question takes its default.** `canAsk()` is the check. Anything destructive
+  that would otherwise default to yes must refuse without a flag, as a push does without `--force`.
+- `takeOverTerminal()` swaps in a plain `OutputStyle` when a person is at a terminal, because
+  `laravel/pao` strips colour based on environment variables an editor terminal can inherit.
 
-## Known skeleton issues (fix when implementing)
+## Safety invariants
 
-- **Migration name mismatch**: provider registers `hasMigration('create_laravel_cloud_db_dumper_table')` but the stub is [create_cloud_db_dumper_table.php.stub](database/migrations/create_cloud_db_dumper_table.php.stub). Names must match for publishing to work.
-- README is still the template default (placeholder description, wrong Spatie badge URLs).
-- `LaravelCloudDbDumper` class, config, and command are all stubs — replace with real dump logic.
-- `phpstan-baseline.neon` is empty (no suppressed errors yet).
+- A restored Cloud cluster reports its source's id. `TargetNavigator::attachCredentials()` checks the
+  returned cluster name; never resolve a cluster by id alone.
+- `PushGuard` refuses a push before anything is read and again once credentials are fetched. Add new
+  checks there, failing closed.
+- Credentials live only on `DatabaseTarget::$connection`, in memory. Never persist, log or print them.
+- Dumps are taken with `--no-owner --no-privileges`, and restores strip ownership statements regardless,
+  so older dumps on disk still load.
 
 ===
 
