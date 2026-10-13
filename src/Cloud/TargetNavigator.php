@@ -5,7 +5,6 @@ namespace VitisStudio\LaravelCloudDbDumper\Cloud;
 use RuntimeException;
 use VitisStudio\LaravelCloudDbDumper\Support\GitRepository;
 
-use function Laravel\Prompts\note;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\spin;
 
@@ -117,6 +116,19 @@ class TargetNavigator
             fn (CloudCli $cloud) => $cloud->clusterWithCredentials($target->clusterId),
             'Fetching database credentials...',
         );
+
+        // A cluster restored from a snapshot reports its source's id, so asking
+        // by id can return the source instead: production, typically. Pulling
+        // from it is a surprise; pushing into it would overwrite it.
+        if ((string) ($cluster['name'] ?? '') !== $target->clusterName) {
+            throw new RuntimeException(sprintf(
+                'Asked Laravel Cloud for cluster "%s" (%s) and got "%s" back. Restored clusters share their '
+                .'source\'s id, so this id cannot tell them apart. Stopping rather than touching the wrong database.',
+                $target->clusterName,
+                $target->clusterId,
+                (string) ($cluster['name'] ?? 'unknown'),
+            ));
+        }
 
         $connection = $cluster['connection'] ?? null;
 
@@ -360,8 +372,6 @@ class TargetNavigator
             $this->organization = $organization;
             $this->organizationResolved = true;
 
-            note("Organization: {$organization}");
-
             return spin(fn () => $call($this->cloud), $message);
         }
     }
@@ -442,16 +452,14 @@ class TargetNavigator
     }
 
     /**
-     * Echo a resolution the user was not asked about, so the run still shows
-     * what it picked.
+     * Take a resolution the user was not asked about. The command reports the
+     * whole target once it is known, rather than one line per step here.
      *
      * @param  array<string, mixed>  $item
      * @return array<string, mixed>
      */
     protected function resolved(string $label, array $item): array
     {
-        note("{$label}: ".(string) $item['name']);
-
         return $item;
     }
 }
