@@ -5,12 +5,14 @@
 [![Code Style](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/fix-php-code-style-issues.yml/badge.svg?branch=main)](https://github.com/vitisstudio/laravel-cloud-db-dumper/actions/workflows/fix-php-code-style-issues.yml)
 [![Total Downloads](https://img.shields.io/packagist/dt/vitisstudio/laravel-cloud-db-dumper.svg?style=flat-square)](https://packagist.org/packages/vitisstudio/laravel-cloud-db-dumper)
 
-Pull a [Laravel Cloud](https://cloud.laravel.com) database down to your machine with one command.
+Pull a [Laravel Cloud](https://cloud.laravel.com) database down to your machine with one command, or
+copy it into another Cloud environment.
 
 `php artisan db:pull` resolves your Cloud target — organization, application, environment, database —
 fetches the connection credentials for it, dumps it to a file, and optionally restores it into your local
-database and runs a seeder to scrub what you just pulled down. It only asks about the parts it cannot
-work out for itself.
+database and runs a seeder to scrub what you just pulled down. With `--to` it restores into another
+environment's Cloud database instead, which is how you fill a new staging environment from production.
+It only asks about the parts it cannot work out for itself.
 
 Dumps are kept, so a later run can restore an earlier snapshot without downloading anything, and
 `--prune` clears them out again. Where policy forbids production data at rest, `--no-store` keeps the
@@ -21,15 +23,22 @@ php artisan db:pull
 ```
 
 ```
- Application: acme-web
+  db:pull
 
- ┌ Environment ─────────────────────────────────────────────────┐
- │ › production                                                 │
- │   staging                                                    │
- └──────────────────────────────────────────────────────────────┘
+ ┌ Pull ─────────────────────────────────────────────────────────────────┐
+ │ From  acme-web › production (acme-db / main)                          │
+ │ Into  your local "acme" database                                      │
+ └───────────────────────────────────────────────────────────────────────┘
 
- Dump written to: database/backups/forge_pgsql_2026-09-24.sql
- Local database restored.
+ ✔ Dumping production
+   ✔ Dumped 12.4 MB to database/backups/main_pgsql_2026-10-13.sql
+
+ ✔ Restoring into your local "acme" database
+   ✔ Closed 1 open connection
+   ✔ Emptied the database
+   ✔ Loaded 48,210 rows across 31 tables
+
+  Restored production into your local "acme" database.
 ```
 
 ## Install it as a dev dependency
@@ -115,8 +124,10 @@ php artisan db:pull app-9f3c env-2a71
 | `--no-store`        | Never leave the dump on disk ([details](#keeping-nothing-on-disk)) |
 | `--no-restore`      | Dump only; leave the local database untouched                     |
 | `--no-seed`         | Skip the post-restore seeder step                                 |
+| `--to=`             | Restore into this environment's Cloud database instead of your local one ([details](#pushing-into-another-environment)) |
+| `--skip-data[=]`    | Create these tables but load none of their rows; with no value, the configured cache, session and queue tables ([details](#restoring-tables-empty)) |
 | `--prune`           | Delete the stored dumps and exit ([details](#deleting-stored-dumps)) |
-| `--force`           | Skip the prune confirmation, for scripts                          |
+| `--force`           | Skip the prune and push confirmations, for scripts                |
 
 ```bash
 php artisan db:pull staging --no-seed
@@ -138,12 +149,86 @@ genuinely ambiguous:
 | **Database**     | sole → prompt, defaulting to the one the environment is wired to                           |
 
 If you have already run `cloud repo:config` in the project, `db:pull` inherits those defaults and can
-run without a single prompt. Anything resolved for you is echoed, so a quiet run still tells you what
-it picked.
+run without a single prompt. Everything it resolved is shown on one card before anything is read or
+written, so a quiet run still tells you what it picked.
+
+A cluster restored from a snapshot reports its source's id rather than one of its own, so asking Laravel
+Cloud for that id can hand back the source — production, typically. `db:pull` checks that the cluster it
+gets back carries the name it asked for, and stops if it does not, rather than dumping or overwriting the
+wrong database.
 
 The environment is deliberately *not* inferred from your current git branch, unlike `cloud deploy`.
 This command overwrites your local database, so which environment it reads from stays an explicit
 choice.
+
+## Pushing into another environment
+
+`--to` copies one environment's database into another environment of the same application, on Laravel
+Cloud, instead of into your local database:
+
+```bash
+php artisan db:pull acme-web production --to=staging --download --skip-data --no-seed
+```
+
+```
+ ┌ Push ─────────────────────────────────────────────────────────────────────────┐
+ │ From          acme-web › production (acme-db / main)                          │
+ │ Into          acme-web › staging (acme-staging / main) on Laravel Cloud       │
+ │ Empty tables  cache, cache_locks, sessions, jobs, job_batches, failed_jobs, … │
+ └───────────────────────────────────────────────────────────────────────────────┘
+
+ ┌ This replaces a Laravel Cloud database ───────────────────────────────────────┐
+ │ Everything in staging (acme-staging / main) is dropped and replaced with      │
+ │ production. There is no undo.                                                 │
+ └───────────────────────────────────────────────────────────────────────────────┘
+
+ ┌ Type "staging" to push ───────────────────────────────────────────────────────┐
+ │ staging                                                                       │
+ └───────────────────────────────────────────────────────────────────────────────┘
+```
+
+The destination's database is emptied — its `public` schema dropped and recreated — and the dump is
+loaded in one transaction, so a restore that fails part way leaves the database empty rather than half
+loaded. Pressing Enter is never enough: you type the destination's name. Without a terminal, `--force`
+stands in for that, and nothing else does.
+
+**Ownership never travels.** Dumps are taken with `--no-owner --no-privileges`, and the restore strips any
+`OWNER TO`, `GRANT`, `REVOKE` or `ALTER DEFAULT PRIVILEGES` an older dump still carries. Every object lands
+owned by the destination's own user, instead of failing on a role that only exists on the source.
+
+A push is refused before production is read when:
+
+- the destination is named `prod` or `production`
+- the destination is the source environment
+- either side is not Postgres — pushing is Postgres only
+
+and refused after the credentials are fetched when the destination resolves to the same host and
+database as the source, which is what two environments sharing one database, or a restored cluster
+resolving to its source, looks like.
+
+After a push, run the destination's migrations if its branch is ahead of the source's, and clear anything
+your app keeps in Redis or another store outside the database. A push does not change the saved target
+that a bare `db:pull` offers next time.
+
+### Restoring tables empty
+
+Some tables hold state that belongs to the environment it came from: queued jobs the other environment
+would run, sessions and password reset tokens issued there, cache entries and monitoring history.
+`--skip-data` creates those tables, with their indexes and sequences, and loads none of their rows:
+
+```bash
+php artisan db:pull --skip-data                      # the configured list
+php artisan db:pull --skip-data=audits,notifications # only these
+php artisan db:pull --skip-data --skip-data=audits   # the configured list, plus audits
+```
+
+The configured list is `skip_data_tables`: `cache`, `cache_locks`, `sessions`, `jobs`, `job_batches`,
+`failed_jobs`, `password_reset_tokens`, and Telescope's and Pulse's tables. A bare name matches that
+table in any schema; `schema.table` matches only there.
+
+The rows are left out at restore time, not at dump time. A day's dump is reused by name, so a dump taken
+without those rows would later be restored, still without them, by a pull that wanted them. The cost is
+that those rows are still downloaded; they are just never loaded. It works with dumps already on disk.
 
 ## Multiple Cloud organizations
 
@@ -178,6 +263,7 @@ CLOUD_ORGANIZATION="Acme Inc"
 | `backup_path`   | —                   | `database/backups`                 | Where dumps are written                            |
 | `store_dumps`   | `CLOUD_DB_DUMPER_STORE_DUMPS` | `true`                   | Whether dumps are kept on disk at all              |
 | `prefs_file`    | —                   | `.db-backup-prefs.json`            | Where the last target is remembered                |
+| `skip_data_tables` | —                | cache, session, queue, Telescope and Pulse tables | What `--skip-data` with no value leaves empty |
 | `binaries`      | see below           | `null` (discover on `PATH`)        | Absolute paths to the database client binaries     |
 
 Point the package at binaries that live outside your `PATH` — a DBngin install, for instance:
@@ -324,6 +410,43 @@ Setting it in config covers the whole team; `--no-store` covers a single run. `-
 The preferences file is a separate thing and is still written. It records the application, environment,
 cluster and database names you picked, and never any credentials — delete it, or point `prefs_file`
 somewhere outside the repository, if even that is more than your policy allows.
+
+## The terminal screen
+
+Run from a terminal, `db:pull` clears the screen and draws its run with [Laravel Prompts](https://laravel.com/docs/prompts):
+a card saying where the data comes from and where it goes, then each step with a live log under it —
+the restore names every table as it loads, with its row count — and a desktop notification when a long
+run finishes. Questions are Prompts questions, so the arrow keys, `y`/`n` and Enter work as they do in
+any Laravel command.
+
+Run without a terminal — piped, in CI, or by an agent — it prints plain lines instead and never clears
+anything.
+
+Tools that rewrite Artisan output for AI agents, such as `laravel/pao`, decide from environment
+variables, and an editor can pass those into the terminal you type in. They strip colour, which leaves a
+yes/no question showing only the marker for the answer that is *not* selected. So when `db:pull` has both
+a terminal and permission to ask questions, it writes straight to the terminal, in colour, whatever
+those variables say.
+
+## Using it from an AI agent
+
+The package ships a [Laravel Boost](https://github.com/laravel/boost) skill,
+`laravel-cloud-db-dumper`, that tells an agent how to run `db:pull` safely without a terminal. Install
+or refresh it with:
+
+```bash
+php artisan boost:install   # pick the package under third-party skills
+```
+
+Without a terminal there is no one to answer, so every question takes its default. That matters:
+
+| Question | Default without a terminal |
+| --- | --- |
+| Use the saved target? | **Yes** — name the application and environment instead |
+| Use a dump already on disk? | Today's, if there is one — pass `--download` |
+| Overwrite the local database? | **Yes** — pass `--no-restore` to only dump |
+| Run a seeder? | The one used last time — pass `--no-seed` |
+| Push into another environment? | Refused unless `--force` is passed |
 
 ## Contributing
 
